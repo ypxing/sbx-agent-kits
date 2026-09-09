@@ -1,0 +1,31 @@
+schemaVersion: "1"
+name: ${{ env.args.agent }}-sbx-dockerfile-public
+agent: ${{ env.args.agent }}-sbx
+workspace: .
+
+args:
+  agent:
+    default: claude
+    description: coding agent
+    enum:
+      - claude
+
+kits:
+   - git+https://github.com/ypxing/docker-sandbox.git#dir=agents/${{ env.args.agent }}
+
+additionalWorkspaces:
+  # avoid updates to the sbx-env folder from the sandbox
+  - path: ./sbxenv.yaml
+    readOnly: true
+
+sandboxOptions:
+  memory: 8g
+
+env:
+  # sandbox
+  IS_SANDBOX: "1"
+  SBX_NO_TELEMETRY: "1"
+
+  # aws
+  AWS_PROFILE: "sso-live"
+  AWS_BEDROCK_FORCE_CACHE: "1"

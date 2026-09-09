@@ -1,0 +1,41 @@
+schemaVersion: "2"
+kind: sandbox
+name: pi-sbx
+displayName: Pi Coding Agent
+description: Pi coding agent on the plain shell base image.
+
+# Image resolved by scripts/gen-specs.sh — set SBX_IMAGE_REGISTRY or
+# SBX_PI_IMAGE before running it to use your own image.
+sandbox:
+  image: "${SBX_PI_IMAGE}"
+  # pi-herdr (scripts/herdr-entrypoint.sh, installed under this
+  # agent-specific name) boots a headless herdr server and starts pi in a
+  # managed pane (as `main`) rather than exec'ing pi directly.
+  # Attach/orchestrate afterward with `sbx exec -it <name> herdr ...`
+  # against the same running server.
+  entrypoint: [pi-herdr]
+
+setup:
+  install:
+    - command: |
+        echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > $HOME/.npmrc
+        echo '//registry.yarnpkg.com/:_authToken=${NPM_TOKEN}' >> $HOME/.npmrc
+      user: "1000"
+      description: "Write npm registry auth tokens to $HOME/.npmrc"
+  startup:
+    - command: ["sh", "-c", "command -v aws >/dev/null 2>&1 && aws sso login || true"]
+      user: "1000"
+      description: "AWS SSO from host"
+
+environment:
+  variables:
+    # sandbox
+    IS_SANDBOX: "1"
+    SBX_NO_TELEMETRY: "1"
+
+    # aws
+    AWS_PROFILE: "sso-live"
+    AWS_BEDROCK_FORCE_CACHE: "1"
+
+    PI_TELEMETRY: "0"
+    PI_SKIP_VERSION_CHECK: "1"

@@ -1,0 +1,15 @@
+{
+  "deniedUrls": [],
+  "trustedFolders": [],
+  "defaultPermissionMode": "allow-all",
+  "appTipShown": true,
+  "reasoningSummariesCleanupDone": true,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "$HOME/.copilot/hooks/pre-bash.sh"
+      }
+    ]
+  }
+}

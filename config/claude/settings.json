@@ -1,0 +1,73 @@
+{
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+  },
+
+  "alwaysThinkingEnabled": true,
+  "copyOnSelect": true,
+  "themeId": 1,
+  "bypassPermissionsModeAccepted": true,
+  "skipDangerousModePermissionPrompt": true,
+  "model": "sonnet",
+
+  "worktree": {
+    "baseRef": "head"
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "cols=$(stty size </dev/tty 2>/dev/null | awk '{print $2}'); export COLUMNS=$(( ${cols:-120} > 4 ? ${cols:-120} - 4 : 1 )); exec node \"$HOME/.claude/plugins/cache/claude-hud/claude-hud/__CLAUDE_HUD_VERSION__/dist/index.js\""
+  },
+  "extraKnownMarketplaces": {},
+  "teammateMode": "in-process",
+  "permissions": {
+    "defaultMode": "bypassPermissions",
+
+    "allow": [
+      "Read",
+      "Edit",
+      "Write",
+      "Bash(git *)",
+      "Bash(make *)",
+      "Bash(docker compose *)",
+      "Bash(npm info *)",
+      "Bash(aws sts get-*)",
+      "Bash(aws s3 ls*)",
+      "Bash(aws s3api list-*)",
+      "Bash(aws s3api get-*)",
+      "Bash(aws s3api head-*)",
+      "Bash(aws s3api select-*)",
+      "Bash(aws logs tail*)",
+      "Bash(aws logs describe-*)",
+      "Bash(aws logs get-*)",
+      "Bash(aws logs list-*)"
+    ],
+    "deny": [
+      "Bash(make *deploy*)",
+      "Bash(docker compose *deploy*)",
+      "Bash(wget *)",
+      "Bash(rm -rf *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "fp=$(jq -r '.tool_input.file_path // \"\"' 2>/dev/null); base=$(basename \"$fp\"); if echo \"$base\" | grep -qE '^\\.(env|npmrc|yarnrc)'; then echo '{\"hookSpecificOutput\": {\"permissionDecision\": \"deny\"}, \"systemMessage\": \"Blocked: reading .env* / .npmrc* / .yarnrc* files is not allowed \u2014 use environment variables directly\"}' >&2; exit 2; fi"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$HOME/.claude/hooks/pre-bash.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

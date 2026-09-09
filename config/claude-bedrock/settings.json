@@ -1,0 +1,11 @@
+{
+  "awsAuthRefresh": "aws sso login",
+  "env": {
+    "CLAUDE_CODE_USE_BEDROCK": "1"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(aws sso login*)"
+    ]
+  }
+}

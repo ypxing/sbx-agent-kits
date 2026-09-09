@@ -1,0 +1,24 @@
+# Codex configuration for Docker sandbox
+# This configuration enables "yolo mode" - no approvals, full access
+
+approval_policy = "never"
+sandbox_mode = "danger-full-access"
+mcp_oauth_credentials_store = "file"
+
+[mcp_servers.mcp-gateway]
+type = "http"
+url = "http://mcp-gateway.docker.internal/mcp"
+[mcp_servers.mcp-gateway.headers]
+Authorization = "Bearer proxy-managed"
+
+# Guardrails for the "Bash" shell tool — same deny rules as the claude/copilot
+# sandbox configs (git push to main/master, non-read-only aws, rm -rf, wget,
+# reading .env*/.npmrc*/.yarnrc*, destructive SQL). Codex's PreToolUse hook
+# contract intentionally mirrors Claude Code's: tool_name "Bash", tool_input
+# = {"command": ...}, and an exit code of 2 blocks the call.
+[[hooks.PreToolUse]]
+matcher = "Bash"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "$HOME/.codex/hooks/pre-bash.sh"

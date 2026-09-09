@@ -1,0 +1,34 @@
+# herdr config for the sbx sandbox images — https://herdr.dev/docs/config-reference/
+#
+# Baked into ~/.config/herdr/config.toml when INSTALL_HERDR=true, by
+# scripts/write-herdr-config.sh. herdr works fine with no config file at
+# all, so this only sets values that matter for how these containers are
+# actually used (see herdr-entrypoint.sh) — everything else is left at
+# herdr's own defaults.
+
+# These containers are driven headlessly by herdr-entrypoint.sh, or attached
+# to briefly via `sbx exec` — never by someone who wants the first-run
+# onboarding walkthrough. Skip it.
+onboarding = false
+
+[update]
+# herdr itself is pinned to HERDR_VERSION and upgraded by rebuilding the
+# image (see scripts/install-herdr.sh's checksum-pinned install) —
+# reproducibility over always-latest. Don't let the running binary check
+# for or nag about a newer release it can't self-update to anyway.
+version_check = false
+manifest_check = false
+
+[ui]
+# Match the copy-on-select behavior enabled in config/claude/settings.json
+# (copyOnSelect: true) — copy highlighted text to the clipboard.
+copy_on_select = true
+
+[ui.sound]
+# Sandbox containers have no audio device; avoid startup noise/errors.
+enabled = false
+
+[terminal]
+# These images only ship bash (no nu/zsh/etc — see install-herdr.sh), and
+# herdr would otherwise fall back to $SHELL or /bin/sh. Pin it explicitly.
+default_shell = "bash"
