@@ -307,7 +307,3 @@ permissions:
     allow:
       - "github.com"
       - "*.githubusercontent.com"
-
-environment:
-  variables:
-    HERDR_ENV: "1"
