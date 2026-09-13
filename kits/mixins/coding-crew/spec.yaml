@@ -1,0 +1,35 @@
+schemaVersion: "2"
+kind: mixin
+name: coding-crew-mixin
+displayName: coding-crew skills
+description: >
+  Installs ypxing/coding-crew skills (TDD, PR review, issue-tracker
+  workflows, etc.) for whichever agent CLI the sandbox is running.
+  https://github.com/ypxing/coding-crew
+
+args:
+  version:
+    description: coding-crew version tag to install (e.g. "1.2.3"), or "latest"
+    default: latest
+
+setup:
+  install:
+    - command: |
+        set -euo pipefail
+        VERSION="${version:-latest}"
+        AGENT=""
+        for candidate in claude codex copilot pi; do
+          if command -v "${candidate}" >/dev/null 2>&1; then
+            AGENT="${candidate}"
+            break
+          fi
+        done
+        if [ -z "${AGENT}" ]; then
+          echo "[coding-crew] ERROR: no supported agent CLI (claude|codex|copilot|pi) found on PATH" >&2
+          exit 1
+        fi
+        echo "[coding-crew] Installing coding-crew skills (${AGENT} @ ${VERSION})"
+        curl -fsSL https://raw.githubusercontent.com/ypxing/coding-crew/main/bootstrap.sh \
+          | bash -s -- "${AGENT}" --version "${VERSION}"
+      user: "1000"
+      description: "Install coding-crew skills for the detected agent CLI"

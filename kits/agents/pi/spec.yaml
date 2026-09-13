@@ -1,0 +1,27 @@
+schemaVersion: "2"
+kind: sandbox
+name: pi-sbx
+displayName: Pi Coding Agent
+description: Pi coding agent on the plain shell base image.
+
+args:
+  image:
+    description: "Full image reference, e.g. my.registry.io/pi:latest"
+    default: "docker.io/ypxing/sbx-agent:pi-docker"
+  entrypoint_cmd:
+    description: >
+      pi | pi-herdr. Defaults to launching pi directly; set to pi-herdr
+      once the kits/mixins/herdr/ mixin kit is applied, to boot through a
+      headless herdr server with pi running as a managed pane instead —
+      see README's "Optional: herdr" section.
+    enum: ["pi", "pi-herdr"]
+    default: "pi"
+
+sandbox:
+  image: "${{ kit.args.image }}"
+  entrypoint: ["${{ kit.args.entrypoint_cmd }}"]
+
+environment:
+  variables:
+    PI_TELEMETRY: "0"
+    PI_SKIP_VERSION_CHECK: "1"

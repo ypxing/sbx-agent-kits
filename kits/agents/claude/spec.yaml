@@ -1,0 +1,22 @@
+schemaVersion: "2"
+kind: sandbox
+name: claude-sbx
+displayName: Claude Code
+description: Claude Code agent.
+
+args:
+  image:
+    description: "Full image reference, e.g. my.registry.io/claude:latest"
+    default: "docker.io/ypxing/sbx-agent:claude-docker"
+  entrypoint_cmd:
+    description: >
+      claude | claude-herdr. Defaults to launching claude directly; set to
+      claude-herdr once the kits/mixins/herdr/ mixin kit is applied, to
+      boot through a headless herdr server with claude running as a
+      managed pane instead — see README's "Optional: herdr" section.
+    enum: ["claude", "claude-herdr"]
+    default: "claude"
+
+sandbox:
+  image: "${{ kit.args.image }}"
+  entrypoint: ["${{ kit.args.entrypoint_cmd }}"]

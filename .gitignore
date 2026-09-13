@@ -2,3 +2,5 @@
 temp
 *.tar
 *.tar.gz
+.DS_Store
+*.log

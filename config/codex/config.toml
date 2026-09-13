@@ -5,12 +5,6 @@ approval_policy = "never"
 sandbox_mode = "danger-full-access"
 mcp_oauth_credentials_store = "file"
 
-[mcp_servers.mcp-gateway]
-type = "http"
-url = "http://mcp-gateway.docker.internal/mcp"
-[mcp_servers.mcp-gateway.headers]
-Authorization = "Bearer proxy-managed"
-
 # Guardrails for the "Bash" shell tool — same deny rules as the claude/copilot
 # sandbox configs (git push to main/master, non-read-only aws, rm -rf, wget,
 # reading .env*/.npmrc*/.yarnrc*, destructive SQL). Codex's PreToolUse hook

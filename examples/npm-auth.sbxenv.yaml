@@ -1,0 +1,24 @@
+# claude + private npm/yarn registry auth.
+#
+# Requires an NPM_TOKEN secret set before running — sourced from wherever
+# you keep it, e.g.:
+#
+#   aws secretsmanager get-secret-value --secret-id npm-token --query SecretString --output text \
+#     | xargs -I {} sbx secret set-custom --host registry.npmjs.org --host registry.yarnpkg.com --env NPM_TOKEN --value {}
+#
+# or, from the macOS Keychain instead of AWS Secrets Manager:
+#
+#   security find-generic-password -s npm-token -w \
+#     | xargs -I {} sbx secret set-custom --host registry.npmjs.org --host registry.yarnpkg.com --env NPM_TOKEN --value {}
+#
+# Then:
+#
+#   sbx env run examples/npm-auth.sbxenv.yaml
+
+schemaVersion: "1"
+agent: claude-sbx
+workspace: .
+
+kits:
+  - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/agents/claude
+  - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/npm-auth

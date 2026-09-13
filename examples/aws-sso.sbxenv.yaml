@@ -1,0 +1,29 @@
+# claude + AWS CLI with SSO login, routed through Bedrock. auth_mode and
+# the sso_* values aren't declared as env-file args below — pass them
+# straight through to the aws mixin with --kit-arg (sbx routes each by
+# arg name to whichever kit declares it, no plumbing required):
+#
+#   sbx env run examples/aws-sso.sbxenv.yaml \
+#     --kit-arg auth_mode=sso \
+#     --kit-arg sso_start_url=https://YOUR_ORG.awsapps.com/start \
+#     --kit-arg sso_region=ap-southeast-2 \
+#     --kit-arg sso_role_name=YourRoleName \
+#     --kit-arg sso_account_id=123456789012
+#
+# claude routes through Bedrock via a plain env var, not a mixin patch (the
+# aws mixin's use_bedrock arg only applies to codex/pi) — set it directly
+# below, alongside whichever inference-profile IDs your org uses.
+
+schemaVersion: "1"
+agent: claude-sbx
+workspace: .
+
+kits:
+  - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/agents/claude
+  - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/aws
+
+env:
+  CLAUDE_CODE_USE_BEDROCK: "1"
+  ANTHROPIC_DEFAULT_SONNET_MODEL: au.anthropic.claude-sonnet-5
+  ANTHROPIC_DEFAULT_OPUS_MODEL: au.anthropic.claude-opus-5
+  ANTHROPIC_DEFAULT_HAIKU_MODEL: au.anthropic.claude-haiku-4-5-20251001-v1:0

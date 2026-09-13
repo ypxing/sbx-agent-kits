@@ -1,0 +1,109 @@
+schemaVersion: "2"
+kind: mixin
+name: agent-packages-mixin
+displayName: per-agent extra packages
+description: >
+  Installs whichever "extra" a detected agent CLI has: for claude, the
+  claude-hud statusline plugin (https://github.com/jarrodwatts/claude-hud)
+  via `claude plugin`, wiring the installed plugin's dist/index.js into
+  ~/.claude/settings.json's statusLine; for pi, a set of npm packages
+  (default: pi-mcp-adapter, pi-web-access, pi-subagents) via `pi install`.
+  codex and copilot have no extras defined, so the mixin is a no-op for
+  them.
+
+args:
+  claude_hud_version:
+    description: claude-hud git tag to install (e.g. "v0.8.0")
+    default: "v0.8.0"
+  pi_packages:
+    description: space-separated list of npm package names to `pi install`
+    default: "pi-mcp-adapter pi-web-access pi-subagents"
+
+setup:
+  install:
+    - command: |
+        set -euo pipefail
+
+        AGENT=""
+        for candidate in claude codex copilot pi; do
+          if command -v "${candidate}" >/dev/null 2>&1; then
+            AGENT="${candidate}"
+            break
+          fi
+        done
+        if [ -z "${AGENT}" ]; then
+          echo "[agent-packages-mixin] ERROR: no supported agent CLI (claude|codex|copilot|pi) found on PATH" >&2
+          exit 1
+        fi
+
+        case "${AGENT}" in
+          claude)
+            VERSION="${{ kit.args.claude_hud_version }}"
+
+            echo "[agent-packages-mixin] Adding claude-hud marketplace @ ${VERSION}"
+            claude plugin marketplace add "https://github.com/jarrodwatts/claude-hud.git#${VERSION}"
+
+            echo "[agent-packages-mixin] Installing claude-hud plugin"
+            claude plugin install claude-hud@claude-hud -y
+
+            CACHE_ROOT="${HOME}/.claude/plugins/cache/claude-hud/claude-hud"
+            INSTALLED_DIR=$(find "${CACHE_ROOT}" -mindepth 1 -maxdepth 1 -type d | head -1)
+            if [ -z "${INSTALLED_DIR}" ] || [ ! -f "${INSTALLED_DIR}/dist/index.js" ]; then
+              echo "[agent-packages-mixin] ERROR: couldn't find dist/index.js under ${CACHE_ROOT}" >&2
+              exit 1
+            fi
+            echo "[agent-packages-mixin] Installed at ${INSTALLED_DIR}"
+
+            SETTINGS="${HOME}/.claude/settings.json"
+            mkdir -p "$(dirname "${SETTINGS}")"
+            [ -f "${SETTINGS}" ] || echo '{}' > "${SETTINGS}"
+            STATUSLINE_CMD="cols=\$(stty size </dev/tty 2>/dev/null | awk '{print \$2}'); export COLUMNS=\$(( \${cols:-120} > 4 ? \${cols:-120} - 4 : 1 )); exec node \"${INSTALLED_DIR}/dist/index.js\""
+            jq --arg cmd "${STATUSLINE_CMD}" '.statusLine = {"type": "command", "command": $cmd}' \
+              "${SETTINGS}" > "${SETTINGS}.tmp" && mv "${SETTINGS}.tmp" "${SETTINGS}"
+            echo "[agent-packages-mixin] set statusLine in ${SETTINGS}"
+
+            HUD_CONFIG_DIR="${HOME}/.claude/plugins/claude-hud"
+            mkdir -p "${HUD_CONFIG_DIR}"
+            jq -n '{
+              language: "en",
+              lineLayout: "expanded",
+              showSeparators: false,
+              gitStatus: {
+                enabled: true,
+                showDirty: true,
+                showAheadBehind: true,
+                showFileStats: false
+              },
+              display: {
+                showModel: true,
+                showContextBar: true,
+                showTools: true,
+                showAgents: true,
+                showTodos: true,
+                showProject: true,
+                showConfigCounts: true,
+                showTokenBreakdown: true,
+                showSpeed: true,
+                showUsage: true,
+                showDuration: true,
+                showSessionName: true,
+                showSessionTokens: true,
+                usageBarEnabled: true
+              }
+            }' > "${HUD_CONFIG_DIR}/config.json"
+            echo "[agent-packages-mixin] wrote ${HUD_CONFIG_DIR}/config.json"
+            ;;
+
+          pi)
+            for pkg in ${{ kit.args.pi_packages }}; do
+              echo "[agent-packages-mixin] pi install npm:${pkg}"
+              pi install "npm:${pkg}"
+            done
+            ;;
+
+          *)
+            echo "[agent-packages-mixin] no extras defined for ${AGENT}, skipping"
+            ;;
+        esac
+      user: "1000"
+      description: "Install per-agent extras (claude-hud for claude, npm packages for pi)"

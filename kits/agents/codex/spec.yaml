@@ -1,0 +1,30 @@
+schemaVersion: "2"
+kind: sandbox
+name: codex-sbx
+displayName: OpenAI Codex
+description: OpenAI Codex CLI agent.
+
+args:
+  image:
+    description: "Full image reference, e.g. my.registry.io/codex:latest"
+    default: "docker.io/ypxing/sbx-agent:codex-docker"
+  entrypoint_cmd:
+    description: >
+      codex | codex-herdr. Defaults to launching codex directly; set to
+      codex-herdr once the kits/mixins/herdr/ mixin kit is applied, to
+      boot through a headless herdr server with codex running as a
+      managed pane instead — see README's "Optional: herdr" section.
+    enum: ["codex", "codex-herdr"]
+    default: "codex"
+
+sandbox:
+  image: "${{ kit.args.image }}"
+  entrypoint: ["${{ kit.args.entrypoint_cmd }}"]
+
+environment:
+  variables:
+    CODEX_HOME: /home/agent/.codex
+    BROWSER: xdg-open
+    # Never let git block on an interactive credential prompt — that would
+    # freeze the Codex TUI. Fail fast instead.
+    GIT_TERMINAL_PROMPT: "0"

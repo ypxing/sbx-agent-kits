@@ -4,19 +4,15 @@
 # Called at Docker build time with:
 #   AGENT=<copilot|pi|codex|claude>
 #
-# AGENT names the CLI only — the auth/routing backend (standard vs bedrock)
-# is a separate PROVIDER build-arg that never changes which package gets
-# installed here, only which config gets layered on later by
-# apply-config.sh. Each branch installs the agent CLI at its latest
-# published version. coding-crew skills are optional and installed
-# separately.
+# Each branch installs the agent CLI at its latest published version.
+# Whether it ends up routing through AWS Bedrock is decided later, at
+# sandbox-creation time, by the kits/mixins/aws/ mixin kit — not here.
+# coding-crew skills are likewise applied later, via the
+# kits/mixins/coding-crew/ mixin kit — not baked in here.
 
 set -euo pipefail
 
 AGENT="${AGENT:-copilot}"
-INSTALL_CODING_CREW="${INSTALL_CODING_CREW:-false}"
-CODING_CREW_VERSION="${CODING_CREW_VERSION:-latest}"
-BOOTSTRAP_URL="https://raw.githubusercontent.com/ypxing/coding-crew/main/bootstrap.sh"
 
 echo "[install-agent] Installing agent: ${AGENT}"
 
@@ -55,9 +51,8 @@ case "${AGENT}" in
     mv "${CLAUDE_BIN}" "${CLAUDE_BIN}.real"
     cp /tmp/claude-wrapper.sh "${CLAUDE_BIN}"
     chmod +x "${CLAUDE_BIN}"
-    # Claude HUD (statusline plugin) is installed later, by
-    # install-agent-extras.sh, after apply-config.sh has written the base
-    # settings.json — see that script for why.
+    # Claude HUD (statusline plugin) is not baked in — apply it at
+    # sandbox-creation time via the kits/mixins/agent-packages/ mixin kit.
     ;;
 
   *)
@@ -66,13 +61,6 @@ case "${AGENT}" in
     exit 1
     ;;
 esac
-
-# ── Optional: coding-crew skills ────────────────────────────────────────────
-if [ "${INSTALL_CODING_CREW}" = "true" ]; then
-  echo "[install-agent] Installing coding-crew skills (${AGENT} @ ${CODING_CREW_VERSION})"
-  curl -fsSL "${BOOTSTRAP_URL}" \
-    | bash -s -- "${AGENT}" --version "${CODING_CREW_VERSION}"
-fi
 
 echo "[install-agent] Done: ${AGENT}"
 

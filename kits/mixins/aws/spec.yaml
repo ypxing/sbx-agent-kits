@@ -1,0 +1,189 @@
+schemaVersion: "2"
+kind: mixin
+name: aws-mixin
+displayName: AWS CLI + auth
+description: >
+  Installs AWS CLI v2, configures auth for AWS/Bedrock access, and
+  optionally switches the sandbox's agent CLI to route through Bedrock.
+  auth_mode=sso writes an SSO profile (as [default]) to
+  /home/agent/.aws/config and logs in at sandbox startup — but only if
+  nobody else already owns config there: it skips writing whenever
+  AWS_CONFIG_FILE is already set, or the file already exists.
+  auth_mode=external installs the CLI only and leaves credentials to
+  whatever's already present — env vars, a container/instance role, or a
+  mounted config file. use_bedrock=true additionally patches codex or pi
+  (whichever is on PATH) to route model calls through Bedrock instead of
+  the vendor's direct API — deliberately layered here rather than baked
+  into the image, since a Bedrock routing config with no AWS credentials
+  behind it can't do anything anyway. claude needs no patch: set
+  CLAUDE_CODE_USE_BEDROCK=1 (and ANTHROPIC_DEFAULT_*_MODEL as needed)
+  directly in your sbxenv.yaml's env: block instead.
+
+args:
+  auth_mode:
+    description: "sso | external"
+    enum: ["sso", "external"]
+    default: "external"
+  sso_start_url:
+    description: "e.g. https://myorg.awsapps.com/start (required when auth_mode=sso)"
+    default: ""
+  sso_region:
+    description: "e.g. ap-southeast-2 (required when auth_mode=sso)"
+    default: ""
+  sso_role_name:
+    description: "e.g. MyRole (required when auth_mode=sso)"
+    default: ""
+  sso_account_id:
+    description: "e.g. 123456789012 (required when auth_mode=sso)"
+    default: ""
+  use_bedrock:
+    description: "true | false — patch the detected codex/pi CLI's config to route through AWS Bedrock. Not applicable to claude — set CLAUDE_CODE_USE_BEDROCK=1 directly in your sbxenv.yaml's env: block instead"
+    enum: ["true", "false"]
+    default: "false"
+  bedrock_region:
+    description: "AWS region for Bedrock model routing (codex only — pi uses an inference-profile ID that already encodes a region, e.g. au.anthropic.claude-sonnet-5)"
+    default: "us-east-1"
+
+setup:
+  install:
+    - command: |
+        set -euo pipefail
+
+        if ! command -v aws >/dev/null 2>&1; then
+          ARCH=$(uname -m)
+          case "${ARCH}" in
+            x86_64)  URL="https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" ;;
+            aarch64) URL="https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" ;;
+            *) echo "[aws-mixin] ERROR: unsupported arch: ${ARCH}" >&2; exit 1 ;;
+          esac
+          echo "[aws-mixin] Installing AWS CLI v2 (${ARCH})"
+          curl -fsSL "${URL}" -o /tmp/awscli.zip
+          unzip -q /tmp/awscli.zip -d /tmp/aws-install
+          /tmp/aws-install/aws/install
+          rm -rf /tmp/awscli.zip /tmp/aws-install
+        fi
+        aws --version
+      user: "0"
+      description: "Install AWS CLI v2"
+    - command: |
+        set -euo pipefail
+
+        MODE="${{ kit.args.auth_mode }}"
+        CONFIG_FILE="/home/agent/.aws/config"
+        if [ "${MODE}" = "sso" ]; then
+          if [ -n "${AWS_CONFIG_FILE:-}" ]; then
+            echo "[aws-mixin] AWS_CONFIG_FILE=${AWS_CONFIG_FILE} already set — someone else owns AWS config, skipping"
+          elif [ -e "${CONFIG_FILE}" ]; then
+            echo "[aws-mixin] ${CONFIG_FILE} already exists — leaving it alone"
+          else
+            START_URL="${{ kit.args.sso_start_url }}"
+            REGION="${{ kit.args.sso_region }}"
+            ROLE_NAME="${{ kit.args.sso_role_name }}"
+            ACCOUNT_ID="${{ kit.args.sso_account_id }}"
+            missing=""
+            [ -n "${START_URL}"  ] || missing="${missing} sso_start_url"
+            [ -n "${REGION}"     ] || missing="${missing} sso_region"
+            [ -n "${ROLE_NAME}"  ] || missing="${missing} sso_role_name"
+            [ -n "${ACCOUNT_ID}" ] || missing="${missing} sso_account_id"
+            if [ -n "${missing}" ]; then
+              echo "[aws-mixin] ERROR: auth_mode=sso requires:${missing}" >&2
+              echo "[aws-mixin] pass them with --kit-arg <name>=<value>" >&2
+              exit 1
+            fi
+
+            mkdir -p "$(dirname "${CONFIG_FILE}")"
+            printf '[sso-session live]\nsso_start_url = %s\nsso_region = %s\nsso_registration_scopes = sso:account:access\n\n[default]\nsso_session = live\nsso_role_name = %s\nsso_account_id = %s\nregion = %s\n' \
+              "${START_URL}" "${REGION}" "${ROLE_NAME}" "${ACCOUNT_ID}" "${REGION}" \
+              > "${CONFIG_FILE}"
+            echo "[aws-mixin] wrote SSO profile to ${CONFIG_FILE}"
+          fi
+        else
+          echo "[aws-mixin] auth_mode=external — credentials left to the ambient chain / mounted config"
+        fi
+      user: "1000"
+      description: "Write an SSO profile when auth_mode=sso"
+    - command: |
+        set -euo pipefail
+
+        if [ "${{ kit.args.use_bedrock }}" != "true" ]; then
+          echo "[aws-mixin] use_bedrock=false — skipping Bedrock routing patch"
+          exit 0
+        fi
+
+        if command -v claude >/dev/null 2>&1; then
+          echo "[aws-mixin] claude routes through Bedrock via a plain env var, not a config patch — set CLAUDE_CODE_USE_BEDROCK=1 (and ANTHROPIC_DEFAULT_*_MODEL as needed) directly in your sbxenv.yaml's env: block instead of use_bedrock=true" >&2
+          exit 1
+        fi
+
+        AGENT=""
+        for candidate in codex pi; do
+          if command -v "${candidate}" >/dev/null 2>&1; then
+            AGENT="${candidate}"
+            break
+          fi
+        done
+        if [ -z "${AGENT}" ]; then
+          echo "[aws-mixin] ERROR: use_bedrock=true but no Bedrock-capable agent CLI (codex|pi) found on PATH — copilot has no Bedrock backend" >&2
+          exit 1
+        fi
+
+        REGION="${{ kit.args.bedrock_region }}"
+
+        case "${AGENT}" in
+          pi)
+            SETTINGS="${HOME}/.pi/agent/settings.json"
+            mkdir -p "$(dirname "${SETTINGS}")"
+            [ -f "${SETTINGS}" ] || echo '{}' > "${SETTINGS}"
+            jq '.defaultProvider = "amazon-bedrock" | .defaultModel = "au.anthropic.claude-sonnet-5"' \
+              "${SETTINGS}" > "${SETTINGS}.tmp" && mv "${SETTINGS}.tmp" "${SETTINGS}"
+            echo "[aws-mixin] set defaultProvider=amazon-bedrock in ${SETTINGS}"
+            ;;
+          codex)
+            CONFIG="${HOME}/.codex/config.toml"
+            mkdir -p "$(dirname "${CONFIG}")"
+            [ -f "${CONFIG}" ] || : > "${CONFIG}"
+            if grep -qx 'model_provider = "amazon-bedrock"' "${CONFIG}" 2>/dev/null; then
+              echo "[aws-mixin] ${CONFIG} already routes through Bedrock — skipping"
+            else
+              # TOML requires root-level (bare) key/values before the
+              # first [table] header, so a naive append would silently
+              # nest model_provider inside whatever table the file left
+              # open last. Split into "preamble" (before the first line
+              # starting with '[') and "tables" (from there on), then
+              # re-emit: preamble, new root key, tables, new tables.
+              toml_preamble() { awk '/^\[/{exit} {print}' "$1"; }
+              toml_tables()   { awk 'BEGIN{f=0} /^\[/{f=1} f{print}' "$1"; }
+              merged="$(mktemp)"
+              {
+                toml_preamble "${CONFIG}"
+                echo 'model_provider = "amazon-bedrock"'
+                toml_tables "${CONFIG}"
+                printf '\n[model_providers.amazon-bedrock]\nwire_api = "responses"\n\n[model_providers.amazon-bedrock.aws]\nregion = "%s"\n' "${REGION}"
+              } > "${merged}"
+              mv "${merged}" "${CONFIG}"
+              echo "[aws-mixin] set model_provider=amazon-bedrock in ${CONFIG}"
+            fi
+            ;;
+        esac
+      user: "1000"
+      description: "Patch the detected agent CLI to route through Bedrock when use_bedrock=true"
+  startup:
+    - command:
+        - sh
+        - -c
+        - |
+          if [ "${{ kit.args.auth_mode }}" = "sso" ]; then
+            command -v aws >/dev/null 2>&1 && aws sso login || true
+          fi
+      user: "1000"
+      description: "AWS SSO login (auth_mode=sso only, no-op otherwise)"
+
+environment:
+  variables:
+    AWS_BEDROCK_FORCE_CACHE: "1"
+
+permissions:
+  network:
+    allow:
+      - "*.amazonaws.com"
+      - "*.awsapps.com"

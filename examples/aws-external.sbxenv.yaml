@@ -1,0 +1,14 @@
+# claude + AWS CLI, with credentials left to the ambient chain — env vars,
+# an instance/container role, or a host ~/.aws/config mounted into the
+# sandbox. Nothing else to configure; this is the aws mixin's default
+# auth_mode.
+#
+#   sbx env run examples/aws-external.sbxenv.yaml
+
+schemaVersion: "1"
+agent: claude-sbx
+workspace: .
+
+kits:
+  - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/agents/claude
+  - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/aws

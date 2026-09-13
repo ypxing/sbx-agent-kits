@@ -1,0 +1,17 @@
+schemaVersion: "2"
+kind: mixin
+name: npm-auth-mixin
+displayName: npm registry auth
+description: >
+  Writes npm/yarn registry auth config to $HOME/.npmrc as a literal
+  ${NPM_TOKEN} placeholder — npm/yarn resolve it from the NPM_TOKEN env var
+  at read time, so the token itself is never baked into the sandbox or this
+  kit. Export NPM_TOKEN in the sandbox environment for it to take effect.
+
+setup:
+  install:
+    - command: |
+        echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' > $HOME/.npmrc
+        echo '//registry.yarnpkg.com/:_authToken=${NPM_TOKEN}' >> $HOME/.npmrc
+      user: "1000"
+      description: "Write npm registry auth tokens to $HOME/.npmrc"

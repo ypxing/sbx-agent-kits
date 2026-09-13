@@ -6,16 +6,13 @@
   "alwaysThinkingEnabled": true,
   "copyOnSelect": true,
   "themeId": 1,
+  "outputStyle": "Concise",
   "bypassPermissionsModeAccepted": true,
   "skipDangerousModePermissionPrompt": true,
   "model": "sonnet",
 
   "worktree": {
     "baseRef": "head"
-  },
-  "statusLine": {
-    "type": "command",
-    "command": "cols=$(stty size </dev/tty 2>/dev/null | awk '{print $2}'); export COLUMNS=$(( ${cols:-120} > 4 ? ${cols:-120} - 4 : 1 )); exec node \"$HOME/.claude/plugins/cache/claude-hud/claude-hud/__CLAUDE_HUD_VERSION__/dist/index.js\""
   },
   "extraKnownMarketplaces": {},
   "teammateMode": "in-process",

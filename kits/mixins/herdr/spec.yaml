@@ -1,0 +1,309 @@
+schemaVersion: "2"
+kind: mixin
+name: herdr-mixin
+displayName: herdr terminal automation
+description: >
+  Installs a checksum-pinned build of herdr (https://herdr.dev), a terminal
+  multiplexer / agent-automation CLI, writes its sandbox-sensible config,
+  registers its official integration hook, and generates the
+  ${AGENT}-herdr entrypoint script for whichever agent CLI (claude | codex
+  | copilot | pi) is on PATH. Point the sandbox at it by setting that same
+  agent kit's `entrypoint_cmd` arg to "${AGENT}-herdr" (see README's
+  "Optional: herdr" section) — nothing herdr-related is baked into the
+  image otherwise, and no rebuild is needed either way.
+
+args:
+  version:
+    description: pinned herdr.dev release to install (no leading "v")
+    default: "0.9.0"
+  # Per-arch sha256 for `version`'s release asset — from
+  # https://herdr.dev/latest.json's "releases" map (one entry per past
+  # version, same shape as its top-level "assets"/"sha256" keys). The
+  # defaults below are for v0.9.0; when bumping `version`, pass both of
+  # these as matching --kit-arg overrides too, or the checksum check below
+  # will (correctly) fail closed instead of installing an unverified binary.
+  sha256_x86_64:
+    description: 'expected sha256 of "herdr-linux-x86_64" for `version` (defaults to v0.9.0''s)'
+    default: "4fa1a01158dd8043da92d31b270780b0dcc10603038d9b61cac4d81ab63fb71f"
+  sha256_aarch64:
+    description: 'expected sha256 of "herdr-linux-aarch64" for `version` (defaults to v0.9.0''s)'
+    default: "9c8db20fb7e7427b138d5367113f1621ffd319f2f65d6f009e2594029115f0d2"
+
+setup:
+  install:
+    - command: |
+        set -euo pipefail
+        VERSION="${{ kit.args.version }}"
+        SHA256_X86_64="${{ kit.args.sha256_x86_64 }}"
+        SHA256_AARCH64="${{ kit.args.sha256_aarch64 }}"
+
+        ARCH="$(uname -m)"
+        case "${ARCH}" in
+          x86_64)  ASSET="herdr-linux-x86_64";  EXPECTED_SHA256="${SHA256_X86_64}" ;;
+          aarch64) ASSET="herdr-linux-aarch64"; EXPECTED_SHA256="${SHA256_AARCH64}" ;;
+          *) echo "[herdr-mixin] ERROR: unsupported arch: ${ARCH}" >&2; exit 1 ;;
+        esac
+
+        AGENT=""
+        for candidate in claude codex copilot pi; do
+          if command -v "${candidate}" >/dev/null 2>&1; then
+            AGENT="${candidate}"
+            break
+          fi
+        done
+        if [ -z "${AGENT}" ]; then
+          echo "[herdr-mixin] ERROR: no supported agent CLI (claude|codex|copilot|pi) found on PATH" >&2
+          exit 1
+        fi
+
+        echo "[herdr-mixin] Installing herdr v${VERSION} (${ARCH}) for ${AGENT}"
+
+        TMP="$(mktemp -d)"
+        trap 'rm -rf "${TMP}"' EXIT
+        URL="https://github.com/herdrdev/herdr/releases/download/v${VERSION}/${ASSET}"
+        curl -fsSL --retry 3 --connect-timeout 10 --max-time 120 "${URL}" -o "${TMP}/herdr"
+
+        ACTUAL_SHA256="$(sha256sum "${TMP}/herdr" | awk '{ print $1 }')"
+        if [ "${ACTUAL_SHA256}" != "${EXPECTED_SHA256}" ]; then
+          echo "[herdr-mixin] ERROR: checksum mismatch for ${ASSET} v${VERSION}" >&2
+          echo "  expected: ${EXPECTED_SHA256}" >&2
+          echo "  actual:   ${ACTUAL_SHA256}" >&2
+          exit 1
+        fi
+
+        INSTALL_DIR="${HOME}/.local/bin"
+        mkdir -p "${INSTALL_DIR}"
+        mv "${TMP}/herdr" "${INSTALL_DIR}/herdr.real"
+        chmod +x "${INSTALL_DIR}/herdr.real"
+
+        # Move the real binary to `herdr.real` and install a wrapper as
+        # `herdr`, matching the claude-wrapper.sh/copilot-wrapper.sh
+        # convention. Works around a herdr 0.9.0 startup race
+        # (https://github.com/herdrdev/herdr/issues/3777): launching the bare
+        # TUI (no args) as the very first command of a freshly-created pty
+        # can read a transient 0x0 terminal size and exit with "terminal
+        # reported a zero-sized grid" instead of retrying. Only the bare
+        # "attach the TUI" invocation is affected, so the delay is skipped
+        # whenever herdr is given any args (e.g. `herdr status`).
+        printf '%s\n' \
+          '#!/usr/bin/env bash' \
+          'set -euo pipefail' \
+          'if [ $# -eq 0 ]; then' \
+          '  sleep 0.3' \
+          'fi' \
+          'exec herdr.real "$@"' \
+          > "${INSTALL_DIR}/herdr"
+        chmod +x "${INSTALL_DIR}/herdr"
+
+        "${INSTALL_DIR}/herdr" --version
+
+        # herdr works fine with no config file at all; this only sets values
+        # that matter for how these sandboxes are actually used — driven
+        # headlessly by ${AGENT}-herdr, or attached to briefly via
+        # `sbx exec`, never by someone wanting the first-run onboarding
+        # walkthrough. See https://herdr.dev/docs/config-reference/.
+        CONFIG_DIR="${HOME}/.config/herdr"
+        mkdir -p "${CONFIG_DIR}"
+        printf '%s\n' \
+          'onboarding = false' \
+          '' \
+          '[update]' \
+          'version_check = false' \
+          'manifest_check = false' \
+          '' \
+          '[ui]' \
+          'copy_on_select = true' \
+          '' \
+          '[ui.sound]' \
+          'enabled = false' \
+          '' \
+          '[terminal]' \
+          'default_shell = "bash"' \
+          > "${CONFIG_DIR}/config.toml"
+
+        # Merges a SessionStart hook into settings.json — safe to run here
+        # since the image's own apply-config.sh has already written it at
+        # build time, long before any mixin runs at sandbox-creation time.
+        herdr integration install "${AGENT}"
+        herdr integration status | grep "^${AGENT}:"
+
+        # Generate the ${AGENT}-herdr entrypoint script: this is the command
+        # each kits/agents/<agent>/spec.yaml's `entrypoint_cmd` arg needs to
+        # be set to (e.g. "claude-herdr") to actually route the sandbox
+        # through herdr — applying this mixin alone doesn't flip that
+        # switch. Written with a literal, quoted heredoc so none of the
+        # script's own runtime variables (LOG_DIR, PROJECT_DIR, etc.) get
+        # expanded now; AGENT is baked in afterward via sed since it's the
+        # one value this mixin already knows.
+        cat > "${INSTALL_DIR}/${AGENT}-herdr" <<'HERDR_ENTRYPOINT'
+        #!/usr/bin/env bash
+        # ${AGENT}-herdr — generated by kits/mixins/herdr/spec.yaml at
+        # sandbox-creation time. Ensures a herdr server is running (starting
+        # one itself if needed — client subcommands like `herdr
+        # status`/`herdr agent list` do NOT lazily spawn one; only the bare
+        # `herdr` TUI does, and only under a real tty, which headless runs
+        # never reach in time). It then starts one `main` agent in a fresh
+        # pane, and either hands off to the herdr TUI (if a real tty is
+        # attached) or polls the server to keep the container's lifecycle
+        # tracking it.
+        #
+        # Bare `herdr` needs a real tty and panics without one, so it's only
+        # exec'd when stdout is a tty (e.g. `docker run -it`).
+        # Headless/detached runs skip straight to polling the server;
+        # runtime access/orchestration then happens via `sbx exec -it
+        # <sandbox> herdr ...` against this same running server.
+
+        set -uo pipefail
+
+        AGENT="__AGENT__"
+
+        # This agent's own flag for skipping interactive approval prompts —
+        # used both for the herdr-less fallback below (normally a
+        # formality, since this script only exists once this mixin has
+        # also installed the real `herdr` binary — kept as a defensive
+        # fallback in case that binary is later removed) and for the
+        # `herdr agent start` invocation further down. pi has none: its
+        # baked-in config already sets defaultProjectTrust=always (see
+        # config/pi/settings.json), so no CLI flag is needed.
+        case "${AGENT}" in
+          claude)  YOLO_ARGS=(--dangerously-skip-permissions) ;;
+          copilot) YOLO_ARGS=(--yolo) ;;
+          codex)   YOLO_ARGS=(--dangerously-bypass-approvals-and-sandbox) ;;
+          pi)      YOLO_ARGS=() ;;
+          *)
+            echo "[herdr-entrypoint] ERROR: unknown AGENT '${AGENT}'" >&2
+            exit 1
+            ;;
+        esac
+
+        if ! command -v herdr >/dev/null 2>&1; then
+          exec "${AGENT}" "${YOLO_ARGS[@]}"
+        fi
+
+        PROJECT_DIR="$(pwd -P)"
+        LOG_DIR="${HOME}/.local/state"
+        mkdir -p "${LOG_DIR}"
+
+        # `herdr status` prints YAML (no --json), e.g.:
+        #   server:
+        #     status: running
+        #     ...
+        # so pull the "status:" line out of the "server:" section
+        # specifically, rather than relying on the command's exit code.
+        herdr_server_running() {
+          herdr status 2>/dev/null | awk '
+            /^[^[:space:]]/ { in_server = 0 }
+            /^server:/ { in_server = 1; next }
+            in_server && /^[[:space:]]*status:/ { print $2; exit }
+          ' | grep -qx running
+        }
+
+        # If some other launcher (e.g. an external setup step running
+        # `herdr server &` via its own exec path) already started a server,
+        # it may have resolved this user's gid/groups differently than this
+        # entrypoint does — dropping supplementary groups like `docker`
+        # entirely. Detect that and restart the server so it ends up
+        # spawned fresh under *this* process's credentials instead.
+        docker_gid="$(getent group docker 2>/dev/null | cut -d: -f3 || true)"
+        if [ -n "${docker_gid}" ] && herdr_server_running; then
+          server_pid="$(pgrep -f '(^|/)herdr server$' | head -1)"
+          if [ -n "${server_pid}" ] && [ -r "/proc/${server_pid}/status" ] \
+             && ! grep -E '^(Gid|Groups):' "/proc/${server_pid}/status" | grep -qw "${docker_gid}"; then
+            echo "[herdr-entrypoint] existing herdr server (pid ${server_pid}) is missing the docker group; restarting it" >&2
+            herdr server stop >/dev/null 2>&1 || true
+            for _ in $(seq 1 25); do
+              herdr_server_running || break
+              sleep 0.2
+            done
+          fi
+        fi
+
+        # Client subcommands never spawn a server on their own, so start
+        # one explicitly if nothing is running at this point (whether none
+        # was ever started, or the bad one above was just stopped). Runs
+        # under this process's own credentials, which are resolved
+        # correctly.
+        if ! herdr_server_running; then
+          echo "[herdr-entrypoint] starting herdr server" >&2
+          herdr server >"${LOG_DIR}/herdr-server.log" 2>&1 &
+          disown
+        fi
+
+        echo "[herdr-entrypoint] waiting for herdr server"
+        for _ in $(seq 1 50); do
+          herdr_server_running && break
+          sleep 0.2
+        done
+
+        if ! herdr_server_running; then
+          echo "[herdr-entrypoint] ERROR: herdr server did not start within 10s; falling back to direct ${AGENT} launch" >&2
+          exec "${AGENT}" "${YOLO_ARGS[@]}"
+        fi
+
+        if herdr agent list 2>/dev/null | jq -e '.result.agents[] | select(.name == "main")' >/dev/null 2>&1; then
+          echo "[herdr-entrypoint] agent 'main' already running, skipping bootstrap"
+        else
+          # Reuse a pane from an existing "main"-labeled workspace (left
+          # behind by an earlier run of this same script — e.g. after a
+          # container restart, or the agent process exiting on its own)
+          # instead of always creating a fresh workspace: `workspace
+          # create` has no dedupe-by-label behavior, so re-running this
+          # script unconditionally would grow a new "main" workspace every
+          # time. A pane only counts as reusable if nothing is currently
+          # occupying it (its `agent` field is empty) — see PaneInfo.
+          workspace_id=$(herdr workspace list 2>/dev/null | jq -r '.result.workspaces[]? | select(.label == "main") | .workspace_id' | head -1)
+          pane_id=""
+          if [ -n "${workspace_id}" ]; then
+            pane_id=$(herdr pane list --workspace "${workspace_id}" 2>/dev/null | jq -r '.result.panes[]? | select(.agent == null) | .pane_id' | head -1)
+          fi
+
+          if [ -n "${pane_id}" ]; then
+            echo "[herdr-entrypoint] reusing existing workspace ${workspace_id}'s pane ${pane_id}"
+          else
+            echo "[herdr-entrypoint] bootstrapping workspace + main ${AGENT} agent in ${PROJECT_DIR}"
+            pane_id=$(herdr workspace create --cwd "${PROJECT_DIR}" --label main --no-focus | jq -r '.result.root_pane.pane_id // empty')
+          fi
+
+          if [ -z "${pane_id}" ]; then
+            echo "[herdr-entrypoint] WARNING: no pane available; skipping agent start" >&2
+          else
+            # `herdr agent start` blocks up to --timeout waiting for
+            # interactive readiness (60s here) — run it in the background
+            # so a tty-attached caller reaches the TUI handoff below
+            # immediately instead of staring at a blank screen for up to a
+            # minute. The pane's real-time output (visible in the TUI, or
+            # in the log below) shows the agent booting either way; this
+            # only removes an artificial wait before that's visible.
+            (
+              if herdr agent start main --kind "${AGENT}" --pane "${pane_id}" --timeout 60000 -- "${YOLO_ARGS[@]}"; then
+                echo "[herdr-entrypoint] agent 'main' ready"
+              else
+                echo "[herdr-entrypoint] WARNING: agent start failed or timed out; server still up for manual retry via 'sbx exec'"
+              fi
+            ) >>"${LOG_DIR}/herdr-agent-main.log" 2>&1 &
+            disown
+          fi
+        fi
+
+        if [ -t 1 ]; then
+          echo "[herdr-entrypoint] tty attached, handing off to herdr TUI"
+          exec herdr
+        fi
+
+        echo "[herdr-entrypoint] headless; tracking server lifecycle"
+        while herdr_server_running; do
+          sleep 5
+        done
+        echo "[herdr-entrypoint] herdr server is no longer running, exiting" >&2
+        HERDR_ENTRYPOINT
+        sed -i "s/__AGENT__/${AGENT}/" "${INSTALL_DIR}/${AGENT}-herdr"
+        chmod +x "${INSTALL_DIR}/${AGENT}-herdr"
+        echo "[herdr-mixin] wrote ${INSTALL_DIR}/${AGENT}-herdr — set this agent kit's entrypoint_cmd arg to \"${AGENT}-herdr\" to use it"
+      user: "1000"
+      description: "Install herdr, write its config, register its agent integration hook, and generate ${AGENT}-herdr"
+
+permissions:
+  network:
+    allow:
+      - "github.com"
+      - "*.githubusercontent.com"
