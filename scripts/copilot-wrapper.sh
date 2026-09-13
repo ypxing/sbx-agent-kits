@@ -54,4 +54,10 @@ _patch_trust() {
 # appears once, same as without this wrapper.
 _patch_trust || echo "[copilot] WARNING: could not pre-trust ${PROJECT_DIR}; continuing" >&2
 
-exec copilot.real "$@"
+# `-a copilot` sets argv[0] back to "copilot" instead of "copilot.real" —
+# tools that identify the running agent by process name (e.g. herdr's
+# pane/process watcher, which only matches the literal agent name) would
+# otherwise never recognize this session, since exec'ing copilot.real
+# unqualified makes it the process name too. See claude-wrapper.sh for the
+# same fix and the herdr-specific reasoning behind it.
+exec -a copilot copilot.real "$@"

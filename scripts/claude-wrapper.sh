@@ -52,4 +52,9 @@ _patch_trust() {
 # appears once, same as without this wrapper.
 _patch_trust || echo "[claude] WARNING: could not pre-trust ${PROJECT_DIR}; continuing" >&2
 
-exec claude.real "$@"
+# `-a claude` sets argv[0] back to "claude" instead of "claude.real" — tools
+# that identify the running agent by process name (e.g. herdr's pane/process
+# watcher, which only matches literal "claude") would otherwise never
+# recognize this session, since exec'ing claude.real unqualified makes it the
+# process name too.
+exec -a claude claude.real "$@"

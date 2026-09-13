@@ -268,12 +268,12 @@ setup:
             echo "[herdr-entrypoint] WARNING: no pane available; skipping agent start" >&2
           else
             # `herdr agent start` blocks up to --timeout waiting for
-            # interactive readiness (60s here) — run it in the background
-            # so a tty-attached caller reaches the TUI handoff below
-            # immediately instead of staring at a blank screen for up to a
-            # minute. The pane's real-time output (visible in the TUI, or
-            # in the log below) shows the agent booting either way; this
-            # only removes an artificial wait before that's visible.
+            # interactive readiness — run it in the background so a
+            # tty-attached caller reaches the TUI handoff below immediately
+            # instead of staring at a blank screen for up to a minute. The
+            # pane's real-time output (visible in the TUI, or in the log
+            # below) shows the agent booting either way; this only removes
+            # an artificial wait before that's visible.
             (
               if herdr agent start main --kind "${AGENT}" --pane "${pane_id}" --timeout 60000 -- "${YOLO_ARGS[@]}"; then
                 echo "[herdr-entrypoint] agent 'main' ready"
@@ -307,3 +307,7 @@ permissions:
     allow:
       - "github.com"
       - "*.githubusercontent.com"
+
+environment:
+  variables:
+    HERDR_ENV: "1"
