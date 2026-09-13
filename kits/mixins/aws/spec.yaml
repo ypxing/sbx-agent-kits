@@ -111,8 +111,10 @@ setup:
         fi
 
         if command -v claude >/dev/null 2>&1; then
-          echo "[aws-mixin] claude routes through Bedrock via a plain env var, not a config patch — set CLAUDE_CODE_USE_BEDROCK=1 (and ANTHROPIC_DEFAULT_*_MODEL as needed) directly in your sbxenv.yaml's env: block instead of use_bedrock=true" >&2
-          exit 1
+          if [ -z "${CLAUDE_CODE_USE_BEDROCK:-}" ]; then
+            echo "[aws-mixin] claude routes through Bedrock via a plain env var, not a config patch — set CLAUDE_CODE_USE_BEDROCK=1 (and ANTHROPIC_DEFAULT_*_MODEL as needed) directly in your sbxenv.yaml's env: block instead of use_bedrock=true. Skipping the patch." >&2
+          fi
+          exit 0
         fi
 
         AGENT=""
