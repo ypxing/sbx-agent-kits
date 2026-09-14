@@ -115,10 +115,13 @@ _consume_kv_word() {
 # `-C <dir>`, `--git-dir=<path>`, `--no-pager`, ...) so callers can reliably
 # find the real subcommand (e.g. `push`) even when such options are inserted
 # between `git` and it (e.g. `git -c credential.helper=x push ...`, which
-# would otherwise dodge a literal `git push` prefix match). Echoes
-# "<subcommand> <rest...>" and returns 0 on success. Returns 1 (echoing
-# nothing) on an unrecognized/unterminated option, so the caller fails
-# closed instead of assuming there are no more options to skip.
+# would otherwise dodge a literal `git push` prefix match). Only the common,
+# realistic subset of git's global options is recognized here -- anything
+# else falls through to the fail-closed `-*)` case below, which is safe
+# (just occasionally over-cautious) rather than silently letting an
+# unrecognized option hide the real subcommand. Echoes "<subcommand>
+# <rest...>" and returns 0 on success; returns 1 (echoing nothing) on an
+# unrecognized/unterminated option.
 git_after_global_opts() {
   local s="$1"
 
@@ -127,25 +130,21 @@ git_after_global_opts() {
 
   while [ -n "$s" ]; do
     case "$s" in
-      -c\ *|--config-env\ *)
+      -c\ *)
         s="${s#* }"
         _consume_kv_word "$s" || return 1
         s="$_rest"
         ;;
-      --config-env=*)
-        _consume_kv_word "${s#--config-env=}" || return 1
-        s="$_rest"
-        ;;
-      -C\ *|--git-dir\ *|--work-tree\ *|--namespace\ *|--exec-path\ *|--super-prefix\ *)
+      -C\ *|--git-dir\ *|--work-tree\ *)
         s="${s#* }"
         _consume_word "$s" || return 1
         s="$_rest"
         ;;
-      --git-dir=*|--work-tree=*|--namespace=*|--exec-path=*|--super-prefix=*)
+      --git-dir=*|--work-tree=*)
         _consume_word "$s" || return 1
         s="$_rest"
         ;;
-      -p|-p\ *|--paginate|--paginate\ *|--no-pager|--no-pager\ *|--bare|--bare\ *|--literal-pathspecs|--literal-pathspecs\ *|--no-optional-locks|--no-optional-locks\ *|--no-replace-objects|--no-replace-objects\ *|--no-lazy-fetch|--no-lazy-fetch\ *|--no-advice|--no-advice\ *)
+      -p|-p\ *|--paginate|--paginate\ *|--no-pager|--no-pager\ *)
         _consume_word "$s" || return 1
         s="$_rest"
         ;;
