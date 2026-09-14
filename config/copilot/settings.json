@@ -1,0 +1,13 @@
+{
+  "deniedUrls": [],
+  "defaultPermissionMode": "allow-all",
+  "copyOnSelect": true,
+  "hooks": {
+    "preToolUse": [
+      {
+        "type": "command",
+        "bash": "$HOME/.copilot/hooks/pre-bash.sh"
+      }
+    ]
+  }
+}
