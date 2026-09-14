@@ -62,18 +62,128 @@ aws_write_detected() {
   return 1
 }
 
+# Consume one "word" from the front of $1: if it starts with a quote,
+# consume through the matching quote (so quoted values containing spaces,
+# e.g. `-c` args, aren't split apart); otherwise consume to the next
+# whitespace. Sets _tok (word, quotes included) and _rest (remainder, with
+# leading whitespace trimmed).
+_consume_word() {
+  local s="$1"
+  case "$s" in
+    \"*)
+      [[ "$s" =~ ^(\"[^\"]*\")[[:space:]]*(.*)$ ]] || return 1
+      _tok="${BASH_REMATCH[1]}"; _rest="${BASH_REMATCH[2]}"
+      ;;
+    \'*)
+      [[ "$s" =~ ^(\'[^\']*\')[[:space:]]*(.*)$ ]] || return 1
+      _tok="${BASH_REMATCH[1]}"; _rest="${BASH_REMATCH[2]}"
+      ;;
+    *)
+      [[ "$s" =~ ^([^[:space:]]+)[[:space:]]*(.*)$ ]] || return 1
+      _tok="${BASH_REMATCH[1]}"; _rest="${BASH_REMATCH[2]}"
+      ;;
+  esac
+}
+
+# Consume a `key=value` style argument whose VALUE may itself be a quoted
+# string containing spaces (e.g. `key='a b'`) even though the `key=` prefix
+# isn't quoted -> a plain whitespace/quote split on the whole token would
+# otherwise stop at the first space inside the value. Also handles the
+# whole `key=value` pair being quoted as one token, and an empty value
+# (e.g. `-c credential.helper=`).
+_consume_kv_word() {
+  local s="$1"
+  if [[ "$s" =~ ^(\"|\') ]]; then
+    _consume_word "$s"; return
+  fi
+  if [[ "$s" =~ ^([^[:space:]=]+=)(.*)$ ]]; then
+    local prefix="${BASH_REMATCH[1]}" val_part="${BASH_REMATCH[2]}"
+    if [ -z "$val_part" ] || [[ "$val_part" == [[:space:]]* ]]; then
+      _tok="$prefix"
+      [[ "$val_part" =~ ^[[:space:]]*(.*)$ ]]
+      _rest="${BASH_REMATCH[1]}"
+      return 0
+    fi
+    _consume_word "$val_part" || return 1
+    _tok="${prefix}${_tok}"
+    return 0
+  fi
+  _consume_word "$s"
+}
+
+# Strip a leading `git` plus any recognized global options (`-c key=value`,
+# `-C <dir>`, `--git-dir=<path>`, `--no-pager`, ...) so callers can reliably
+# find the real subcommand (e.g. `push`) even when such options are inserted
+# between `git` and it (e.g. `git -c credential.helper=x push ...`, which
+# would otherwise dodge a literal `git push` prefix match). Echoes
+# "<subcommand> <rest...>" and returns 0 on success. Returns 1 (echoing
+# nothing) on an unrecognized/unterminated option, so the caller fails
+# closed instead of assuming there are no more options to skip.
+git_after_global_opts() {
+  local s="$1"
+
+  [[ "$s" =~ ^git([[:space:]]+(.*))?$ ]] || return 1
+  s="${BASH_REMATCH[2]:-}"
+
+  while [ -n "$s" ]; do
+    case "$s" in
+      -c\ *|--config-env\ *)
+        s="${s#* }"
+        _consume_kv_word "$s" || return 1
+        s="$_rest"
+        ;;
+      --config-env=*)
+        _consume_kv_word "${s#--config-env=}" || return 1
+        s="$_rest"
+        ;;
+      -C\ *|--git-dir\ *|--work-tree\ *|--namespace\ *|--exec-path\ *|--super-prefix\ *)
+        s="${s#* }"
+        _consume_word "$s" || return 1
+        s="$_rest"
+        ;;
+      --git-dir=*|--work-tree=*|--namespace=*|--exec-path=*|--super-prefix=*)
+        _consume_word "$s" || return 1
+        s="$_rest"
+        ;;
+      -p|-p\ *|--paginate|--paginate\ *|--no-pager|--no-pager\ *|--bare|--bare\ *|--literal-pathspecs|--literal-pathspecs\ *|--no-optional-locks|--no-optional-locks\ *|--no-replace-objects|--no-replace-objects\ *|--no-lazy-fetch|--no-lazy-fetch\ *|--no-advice|--no-advice\ *)
+        _consume_word "$s" || return 1
+        s="$_rest"
+        ;;
+      -*)
+        # Unrecognized option -> can't safely tell if it takes a value, so
+        # we can't reliably locate the subcommand. Fail closed.
+        return 1
+        ;;
+      *)
+        break
+        ;;
+    esac
+  done
+
+  printf '%s' "$s"
+}
+
 # --- git push: allow pushing feature branches, block push to main/master ---
 # Returns 0 (true) if any `git push` invocation targets (or, when the
 # refspec is unspecified, would push) the main/master branch.
 # Reads $segments, set by pre_bash_command_blocked below.
 git_push_protected() {
-  local seg rest tok last_ref positional_count unspecified cur
+  local seg rest tok last_ref positional_count unspecified cur after
   while IFS= read -r seg; do
     case "$seg" in
-      git\ push|git\ push[[:space:]]*) ;;
+      git|git[[:space:]]*) ;;
       *) continue ;;
     esac
-    rest=${seg#git push}
+    if ! after=$(git_after_global_opts "$seg"); then
+      # Couldn't resolve global options on a `git` invocation -> might be
+      # hiding a `push` to main/master. Fail closed rather than skip it.
+      return 0
+    fi
+    case "$after" in
+      push|push[[:space:]]*) ;;
+      *) continue ;;
+    esac
+    rest=${after#push}
     # --all / --mirror push every branch, including protected ones
     case " $rest " in
       *' --all '*|*' --mirror '*) return 0 ;;
