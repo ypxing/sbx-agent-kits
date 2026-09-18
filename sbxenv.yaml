@@ -28,9 +28,7 @@ kits:
   - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/herdr
   - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/coding-crew
   - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/npm-auth
-  - source: git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/agent-packages
-    args:
-      host_persist_dir: ${{ env.args.home_dir }}/.sbx/.${{ env.args.agent }}-sbx
+  - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/agent-packages
   - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/domains-access
 
 additionalWorkspaces:
@@ -62,7 +60,7 @@ env:
 
   CLAUDE_CODE_USE_BEDROCK: "1"
   ANTHROPIC_DEFAULT_SONNET_MODEL: au.anthropic.claude-sonnet-5
-  ANTHROPIC_DEFAULT_OPUS_MODEL: au.anthropic.claude-opus-5
+  ANTHROPIC_DEFAULT_OPUS_MODEL: au.anthropic.claude-opus-5[1m]
   ANTHROPIC_DEFAULT_HAIKU_MODEL: au.anthropic.claude-haiku-4-5-20251001-v1:0
 
   # aws
