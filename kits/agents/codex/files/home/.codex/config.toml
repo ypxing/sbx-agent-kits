@@ -7,7 +7,7 @@ mcp_oauth_credentials_store = "file"
 
 # Guardrails for the "Bash" shell tool — same deny rules as the claude/copilot
 # sandbox configs (git push to main/master, non-read-only aws, rm -rf, wget,
-# reading .env*/.npmrc*/.yarnrc*, destructive SQL). Codex's PreToolUse hook
+# reading .env*/.npmrc*/.yarnrc* files, destructive SQL). Codex's PreToolUse hook
 # contract intentionally mirrors Claude Code's: tool_name "Bash", tool_input
 # = {"command": ...}, and an exit code of 2 blocks the call.
 [[hooks.PreToolUse]]

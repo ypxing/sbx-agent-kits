@@ -4,16 +4,23 @@ Run **Claude Code**, **OpenAI Codex**, **GitHub Copilot**, or **Pi** in
 full-autonomy mode — skip the approval prompts, but keep every agent boxed
 in: a disposable [`sbx`](https://docs.docker.com/ai/sandboxes/) sandbox with
 its own network allowlist and scoped credential injection, thrown away when
-the session ends. Pull the prebuilt public image and go — nothing to build.
+the session ends. There's no custom image to build or publish — each kit
+starts from the public `docker/sandbox-templates` base and installs its
+agent CLI at sandbox-creation time via `npm install -g`, so every sandbox
+always runs whatever's newest on npm.
 
-Each image installs exactly one agent CLI at build time, plus its
-config/hooks — nothing else. AWS auth/Bedrock routing, coding-crew skills,
-and [herdr](https://herdr.dev) terminal automation are optional and applied
-at sandbox-creation time instead, via `sbx` mixin kits — so the same public
-image works across any org/auth setup, and nothing org-specific ever gets
-baked in.
+Each `kits/agents/<agent>/` kit installs exactly one agent CLI, plus its
+config/hooks, at sandbox-creation time. AWS auth/Bedrock routing,
+coding-crew skills, and [herdr](https://herdr.dev) terminal automation are
+layered on top the same way via `sbx` mixin kits.
 
 ## Using with `sbx`
+
+`sbx` only pulls kits from allowlisted sources, so allow this repo first:
+
+```
+sbx settings set kit.allowedSources '["docker.io/","github.com/ypxing/"]'
+```
 
 Point `sbx` at a single `sbxenv.yaml` — see Docker's [environment file
 reference](https://docs.docker.com/ai/sandboxes/configuration/environment-files/)
@@ -34,7 +41,7 @@ sbx env run examples/minimal.sbxenv.yaml
 
 `aws-sso.sbxenv.yaml` doesn't declare `auth_mode`/`sso_*` as env-file args —
 pass them straight through to the aws mixin with `--kit-arg` (sbx routes
-each by arg name to whichever kit declares it):
+each by arg name to whichever kit declares it, no plumbing required):
 
 ```
 sbx env run examples/aws-sso.sbxenv.yaml \
@@ -46,9 +53,10 @@ sbx env run examples/aws-sso.sbxenv.yaml \
 ```
 
 `--env-arg` is for args the env file itself declares (like this repo's own
-root `sbxenv.yaml` declaring `agent`/`workspace`) — `--kit-arg` skips that
-and targets the underlying kits directly, which is simpler when a value
-(like these SSO settings) has no reason to be an env-file-level knob.
+root `sbxenv.yaml` declaring `agent`/`workspace`/`home_dir`) — `--kit-arg`
+skips that and targets the underlying kits directly, which is simpler when
+a value (like these SSO settings) has no reason to be an env-file-level
+knob.
 
 `npm-auth.sbxenv.yaml` needs an `NPM_TOKEN` secret set first, sourced from
 wherever you keep it — e.g. from the macOS Keychain:
@@ -61,14 +69,18 @@ security find-generic-password -s npm-token -w \
 This repo's own `sbxenv.yaml` (at the root) is a fuller example: it lets you
 pick any of the four agents (`--env-arg agent=codex`) and layers in every
 mixin at once — useful as a reference for building your own, but the
-`examples/` above are the ones to start from.
+`examples/` above are the ones to start from. It also requires
+`--env-arg home_dir=$HOME` (a host path it uses to persist each agent's
+session/memory state across sandbox recreation — see "Persisting session
+state" below).
 
 ## Config layering
 
-Every image copies `config/<agent>/` to the agent's home dir at build time
-(`~/.claude`, `~/.codex`, `~/.copilot`, `~/.pi/agent`), including a shared
-`pre-bash.sh` guardrail hook — see `config/common/pre-bash-common.sh` for
-the full list of blocked commands.
+Each `kits/agents/<agent>/files/home/` bundles that agent's base settings +
+hooks as static files, landed in its home dir (`~/.claude`, `~/.codex`,
+`~/.copilot`, `~/.pi/agent`) before `setup.install` runs — including a
+shared `pre-bash.sh` guardrail hook; see the `pre-bash-common.sh` next to
+it in each kit for the full list of blocked commands.
 
 Each agent's base config also defaults to full-autonomy / auto-approve mode
 (e.g. Claude's `bypassPermissionsModeAccepted`, Codex's
@@ -77,6 +89,20 @@ intentional, not an oversight: the sandbox's network allowlist and
 `pre-bash.sh` guardrails are what keep an unattended agent boxed in, and
 the disposable container/scoped credentials limit the blast radius if it
 still goes off the rails.
+
+## Persisting session state
+
+Every `kits/agents/<agent>/spec.yaml` declares a `host_persist_dir` arg —
+point it at a host directory (mounted separately, e.g. via
+`additionalWorkspaces`) and that agent's session/resume/history state gets
+symlinked into it, so it survives sandbox recreation. Everything else
+stays sandbox-local. Each kit's `spec.yaml` documents exactly which paths
+it persists. Leave the arg unset for a fully ephemeral sandbox.
+
+The root `sbxenv.yaml` wires this up already (`home_dir` arg →
+`${home_dir}/.sbx/.<agent>-sbx`); the `agent-packages` mixin's
+`host_persist_dir` arg does the same for ECC's own session memory when
+`install_ecc=true`.
 
 ## Mixin reference
 
@@ -89,9 +115,15 @@ Beyond the examples above, each mixin under `kits/mixins/` can help with:
 - **`coding-crew/`** — installs
   [coding-crew](https://github.com/ypxing/coding-crew) skills.
 - **`agent-packages/`** — per-agent extras (claude-hud statusline for
-  claude, extra npm packages for pi).
+  claude, extra npm packages for pi, and optionally
+  [ECC](https://github.com/affaan-m/ECC) for claude/codex via
+  `install_ecc=true`).
 - **`npm-auth/`** — private npm/yarn registry auth via an `NPM_TOKEN`
   secret.
+- **`domains-access/`** — standalone network allowlist for AWS, GitHub
+  (incl. `*.github.io`), npm/yarn, Python/Go/Rust registries, container
+  registries, and claude/copilot/codex docs sites — add your own org's
+  domains to it. No install step — permissions only.
 
 Each `spec.yaml` documents its own args in full.
 
@@ -100,78 +132,40 @@ Each `spec.yaml` documents its own args in full.
 ### Layout
 
 ```
-Dockerfile          Universal template — one agent CLI per build (see ARGs below)
-docker-bake.hcl      Build matrix: agent × base variant
-Makefile             AWS SSO login, ECR build/tag/push, Docker Hub publish
-
 kits/agents/<agent>/
-  spec.yaml          Ready-to-use sbx kit; `image` defaults to the public Docker
-                      Hub tag and can be overridden per-run with `--kit-arg image=...`
+  spec.yaml          Ready-to-use sbx kit: installs the agent CLI at
+                      sandbox-creation time (npm install -g), wraps its
+                      binary to pre-accept the trust dialog, and links
+                      persistent session state if host_persist_dir is set
+  files/home/.<agent>/  Static base settings + guardrail hooks, landed in
+                        the agent's home dir before setup.install runs
 
-kits/mixins/          sbx mixin kits — applied at sandbox-creation time, not baked in
-  agent-packages/      per-agent extras: claude-hud for claude, npm packages for pi
+kits/mixins/          sbx mixin kits — applied at sandbox-creation time, layered on top
+  agent-packages/      per-agent extras: claude-hud for claude, npm packages for pi, optional ECC
   aws/                 AWS CLI/auth + optional Bedrock routing
   coding-crew/         coding-crew skills
+  domains-access/      standalone developer network allowlist
   herdr/               herdr terminal automation
   npm-auth/            npm/yarn registry auth
 
-config/<agent>/       Base settings + hooks for each agent
-config/common/        Shared guardrails (pre-bash.sh hook library)
-
-scripts/              Install/config helpers invoked by the Dockerfile
 examples/             sbxenv.yaml per use case (see "Using with sbx" above)
 sbxenv.yaml           Local sbx environment for this repo (workspace = .)
 LICENSE               MIT
 ```
 
-### Building an image locally
+### Kit spec reference
+
+Each `spec.yaml` follows Docker's [kit spec
+reference](https://docs.docker.com/ai/sandboxes/configuration/kit-spec-reference/):
+`args` declare overridable inputs (`--kit-arg <name>=<value>`), `setup.install`
+runs once at sandbox-creation time (after `files/home/` has already landed),
+`setup.startup` runs every time the sandbox starts, and `permissions.network.allow`
+is the network allowlist a kit needs to actually function under
+`sbx policy init deny-all`.
+
+### Testing a kit locally
 
 ```
-docker build --build-arg AGENT=claude -t claude:latest .
+sbx run --kit ./kits/agents/claude claude
+sbx policy log   # lists every network call a kit made, and whether it was allowed
 ```
-
-or the full matrix with buildx bake:
-
-```
-docker buildx bake claude-docker      # sbx-agent:claude-docker
-docker buildx bake                    # default group: copilot, pi, codex, claude (shell variant)
-docker buildx bake claude claude-docker  # both variants for one agent
-```
-
-Key `Dockerfile` build args:
-
-| ARG            | Values                                   | Default        | Effect                   |
-| -------------- | ---------------------------------------- | -------------- | ------------------------ |
-| `AGENT`        | `copilot` \| `pi` \| `codex` \| `claude` | `copilot`      | Which CLI to install     |
-| `BASE_VARIANT` | `shell` \| `shell-docker`                | `shell-docker` | Docker-in-Docker support |
-
-See the Dockerfile header comment for more build examples and image-naming
-details.
-
-### Publishing images
-
-```
-make sso-login            # aws sso login (host-side, for pushing to your ECR)
-make ecr-login            # docker login to your ECR
-make claude-docker
-make tag push              # tag + push the Makefile's IMAGES to $ECR
-```
-
-`IMAGES` (in the Makefile) is `claude-docker copilot-docker pi-docker` by
-default — codex isn't included in this private ECR flow; add it there if
-you need it.
-
-No image bakes in AWS credentials or Bedrock routing config, so all four
-images are also safe to publish publicly:
-
-```
-export DOCKERHUB_USER=your-dockerhub-username
-
-make docker-login          # once per session
-make publish                # build → tag → push all four to docker.io/$DOCKERHUB_USER/sbx-agent
-make publish-image IMAGE=claude-docker   # just one
-```
-
-Set `DOCKERHUB_TOKEN` to log in non-interactively (e.g. in CI). Override
-`SSO_*`, `ECR`, or `DOCKERHUB_USER` in the Makefile to point at your own
-registry.

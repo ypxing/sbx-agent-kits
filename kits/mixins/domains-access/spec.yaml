@@ -1,0 +1,59 @@
+schemaVersion: "2"
+kind: mixin
+name: domains-access-mixin
+displayName: developer network allowlist
+description: >
+  Adds a standalone network allowlist for common developer domains:
+  AWS/Bedrock, GitHub (incl. github.io pages, where many projects deploy
+  OpenAPI/API docs), npm/yarn, Python/Go/Rust package registries, container
+  registries, and the hosted docs sites for claude/copilot/codex. Installs
+  nothing — permissions only. Carries its own copy of AWS/GitHub domains
+  too, so it works even when composed without the aws/herdr/agent-packages
+  mixins that also grant them. Add your own org's internal domains to the
+  bottom of the allow list below.
+
+permissions:
+  network:
+    allow:
+      # your org's internal domains — add them here, e.g.:
+      # - "*.your-org.example.com"
+
+      # AWS / Bedrock
+      - "*.amazonaws.com"
+      - "*.awsapps.com"
+
+      # GitHub (repos, releases, raw content, github.io pages e.g. OpenAPI docs)
+      - "github.com"
+      - "*.githubusercontent.com"
+      - "*.github.io"
+
+      # npm / yarn
+      - "registry.npmjs.org"
+      - "registry.yarnpkg.com"
+
+      # Python
+      - "pypi.org"
+      - "files.pythonhosted.org"
+
+      # Go
+      - "proxy.golang.org"
+
+      # Rust
+      - "crates.io"
+      - "static.crates.io"
+
+      # container registries
+      - "docker.io"
+      - "registry-1.docker.io"
+      - "auth.docker.io"
+      - "production.cloudflare.docker.com"
+      - "ghcr.io"
+
+      # agent CLI docs
+      - "docs.claude.com"
+      - "docs.github.com"
+      - "platform.openai.com"
+
+      # AWS docs
+      - "docs.aws.amazon.com"
+      - "aws.amazon.com"

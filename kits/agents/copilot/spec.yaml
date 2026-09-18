@@ -6,8 +6,8 @@ description: GitHub Copilot agent with GITHUB_TOKEN auth.
 
 args:
   image:
-    description: "Full image reference, e.g. my.registry.io/copilot:latest"
-    default: "docker.io/ypxing/sbx-agent:copilot-docker"
+    description: "Full image reference, e.g. my.registry.io/my-base:latest"
+    default: "docker/sandbox-templates:shell-docker"
   entrypoint_cmd:
     description: >
       copilot | copilot-herdr. Defaults to launching copilot directly; set
@@ -16,10 +16,150 @@ args:
       managed pane instead — see README's "Optional: herdr" section.
     enum: ["copilot", "copilot-herdr"]
     default: "copilot"
+  host_persist_dir:
+    description: >
+      Optional host directory (mounted separately, e.g. via
+      additionalWorkspaces) used to persist Copilot session/resume state
+      across sandbox recreation: ~/.copilot/session-store.db (sessions,
+      turns, checkpoints), ~/.copilot/session-state/ (per-session
+      checkpoint/rewind files), and ~/.copilot/command-history-state.json
+      (interactive prompt input history, i.e. up-arrow recall) are
+      symlinked into it. Everything else in ~/.copilot (config.json, logs)
+      and ~/.cache/copilot (downloaded binaries) stays sandbox-local. Leave
+      unset for a fully ephemeral sandbox.
+    default: ""
 
 sandbox:
   image: "${{ kit.args.image }}"
   entrypoint: ["${{ kit.args.entrypoint_cmd }}"]
+
+setup:
+  install:
+    - command: |
+        set -euo pipefail
+
+        # Installs the latest published Copilot CLI at sandbox-creation
+        # time (rather than baking a pinned version into a custom image),
+        # so every sandbox always runs whatever's newest on npm. Base
+        # config/settings + guardrail hooks are bundled as static files
+        # under files/home/.copilot/ (see the kit spec reference's "Static
+        # files" section) and already land in place before this step runs.
+        npm install -g @github/copilot
+
+        # Belt-and-suspenders: the kit spec reference doesn't explicitly
+        # promise the hooks' executable bit survives the files/home/ copy.
+        chmod +x "${HOME}/.copilot/hooks/"*.sh
+      user: "1000"
+      description: "Install Copilot CLI"
+
+    - command: |
+        set -uo pipefail
+
+        # Symlink Copilot session/resume state to a host-mounted dir (if
+        # given) so it survives sandbox recreation. Everything else under
+        # ~/.copilot (config.json, logs) stays sandbox-local.
+        HOST_PERSIST_DIR="${{ kit.args.host_persist_dir }}"
+        if [ -n "${HOST_PERSIST_DIR}" ]; then
+          if [ ! -d "${HOST_PERSIST_DIR}" ]; then
+            echo "[copilot-sbx] ERROR(20): host_persist_dir=${HOST_PERSIST_DIR} does not exist (mount missing?)" >&2
+            exit 20
+          fi
+          mkdir -p "${HOME}/.copilot"
+
+          for entry in session-state:dir session-store.db:file command-history-state.json:file; do
+            rel="${entry%%:*}"
+            kind="${entry##*:}"
+            src="${HOST_PERSIST_DIR}/${rel}"
+            dest="${HOME}/.copilot/${rel}"
+            if [ "${kind}" = "dir" ]; then mkdir -p "${src}"; else touch "${src}"; fi
+            if [ -e "${dest}" ] && [ ! -L "${dest}" ]; then
+              echo "[copilot-sbx] moving ${dest} aside to ${dest}.orig"
+              mv "${dest}" "${dest}.orig"
+            fi
+            if [ ! -L "${dest}" ]; then
+              echo "[copilot-sbx] linking ${dest} -> ${src}"
+              ln -s "${src}" "${dest}"
+            fi
+          done
+        fi
+      user: "1000"
+      description: "Link persistent session state and command history, if mounted"
+
+    - command: |
+        set -euo pipefail
+
+        # Copilot's trustedFolders list lives in ~/.copilot/config.json,
+        # keyed by the *resolved* working directory — sbx mirrors the
+        # host's literal path into the container, so it's unknown at
+        # image-build time.
+        #
+        # This has to run synchronously, right before the real `copilot`
+        # binary starts, computing WORKDIR from its own `pwd -P` at that
+        # exact moment — not from setup.install's cwd (the kit spec
+        # reference: install commands start in the image's default WORKDIR,
+        # which "isn't necessarily the primary workspace in a direct-mounted
+        # or clone-mode sandbox"), and not as a separate setup.startup step
+        # either (the reference again: "the agent launches once startup
+        # commands have been dispatched, regardless of `background`" — i.e.
+        # startup commands race the agent's own trust check and can lose).
+        # So we shadow the real binary itself: rename it to `copilot.real`
+        # and install a wrapper in its place that patches trust then execs
+        # it. entrypoint_cmd=copilot and =copilot-herdr both end up invoking
+        # `copilot` by bare name via PATH lookup at actual launch time (see
+        # kits/mixins/herdr/spec.yaml's `exec "${AGENT}"` /
+        # `herdr agent start ... --kind "${AGENT}"`), so this covers both.
+        # (Same approach as kits/agents/claude/spec.yaml.)
+        REAL_COPILOT="$(command -v copilot)"
+        if [ -z "${REAL_COPILOT}" ]; then
+          echo "[copilot-sbx] ERROR(14): copilot binary not found on PATH after npm install" >&2
+          exit 14
+        fi
+        mv "${REAL_COPILOT}" "${REAL_COPILOT}.real"
+
+        cat > "${REAL_COPILOT}" <<'WRAPPER_EOF'
+        #!/usr/bin/env bash
+        set -uo pipefail
+
+        WORKDIR="$(pwd -P)"
+        CONFIG_JSON="${HOME}/.copilot/config.json"
+        mkdir -p "$(dirname "${CONFIG_JSON}")"
+
+        # config.json is "managed automatically" by copilot itself and
+        # starts with `//`-style comment lines once copilot has written to
+        # it, which jq's strict JSON parser rejects outright — strip those
+        # before merging. An empty/blank file has no JSON value for jq to
+        # operate on, so treat it as `{}` instead.
+        STRIPPED='{}'
+        if [ -f "${CONFIG_JSON}" ]; then
+          STRIPPED="$(grep -v '^[[:space:]]*//' "${CONFIG_JSON}")"
+          if [ -z "${STRIPPED//[[:space:]]/}" ]; then
+            STRIPPED='{}'
+          fi
+        fi
+
+        if command -v jq >/dev/null 2>&1 && printf '%s' "${STRIPPED}" | jq empty >/dev/null 2>&1; then
+          if printf '%s' "${STRIPPED}" \
+            | jq --arg dir "${WORKDIR}" '
+                .trustedFolders = ((.trustedFolders // []) + [$dir] | unique)
+              ' > "${CONFIG_JSON}.tmp"; then
+            mv "${CONFIG_JSON}.tmp" "${CONFIG_JSON}"
+            chmod 600 "${CONFIG_JSON}"
+          else
+            rm -f "${CONFIG_JSON}.tmp"
+          fi
+        fi
+
+        exec __REAL_COPILOT__ "$@"
+        WRAPPER_EOF
+
+        # Bake in the real binary's path (sed, not heredoc expansion, so
+        # $dir/$WORKDIR/etc. above stay literal for the wrapper to expand
+        # at its own runtime — same __TOKEN__ + sed pattern
+        # kits/mixins/herdr/spec.yaml uses for __AGENT__).
+        sed -i "s#__REAL_COPILOT__#${REAL_COPILOT}.real#" "${REAL_COPILOT}"
+        chmod +x "${REAL_COPILOT}"
+      user: "1000"
+      description: "Wrap the copilot binary to pre-trust the real workspace cwd in ~/.copilot/config.json before it starts"
 
 credentials:
   - service: github
@@ -63,6 +203,8 @@ permissions:
       - api.individual.githubcopilot.com # Copilot Pro and Pro+
       - copilot.github.com
       - github.com
+      # npm install -g @github/copilot, above.
+      - registry.npmjs.org
       # `apt-get update` (the startup hook below) refreshes metadata for every
       # configured apt source and returns exit 100 if any one of them fails.
       # The shell-docker base ships three sources, so all three must be

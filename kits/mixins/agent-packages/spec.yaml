@@ -8,8 +8,13 @@ description: >
   via `claude plugin`, wiring the installed plugin's dist/index.js into
   ~/.claude/settings.json's statusLine; for pi, a set of npm packages
   (default: pi-mcp-adapter, pi-web-access, pi-subagents) via `pi install`.
-  codex and copilot have no extras defined, so the mixin is a no-op for
-  them.
+  copilot has no extras defined, so the mixin is a no-op for it. When
+  install_ecc=true, also installs ECC (https://github.com/affaan-m/ECC) as
+  a native marketplace plugin for claude and codex — the two agents ECC's
+  own platform-support matrix lists as natively supported; ECC has no
+  CLI-installable extra for copilot (instruction-only via checked-in
+  project files) or pi (unsupported harness), so install_ecc is a no-op
+  for those.
 
 args:
   claude_hud_version:
@@ -18,11 +23,37 @@ args:
   pi_packages:
     description: space-separated list of npm package names to `pi install`
     default: "pi-mcp-adapter pi-web-access pi-subagents"
+  install_ecc:
+    description: "true | false — also install ECC (agent harness skills/agents/hooks system) for claude and codex"
+    enum: ["true", "false"]
+    default: "false"
+  ecc_version:
+    description: ECC git tag to pin for claude when install_ecc=true (e.g. "v2.2.1"); codex has no documented way to pin a marketplace plugin to a tag, so this only affects claude
+    default: "v2.2.1"
+  host_persist_dir:
+    description: >
+      Optional host directory (mounted separately, e.g. via
+      additionalWorkspaces) to persist ECC's own session memory across
+      sandbox recreation, when install_ecc=true: session-data/ (session
+      summaries), session-aliases.json (name-to-session-ID aliases), and
+      skills/learned/ (skills learned via /learn-eval) under
+      $ECC_AGENT_DATA_HOME (defaults to ~/.claude) are symlinked into it.
+      Claude-only — ECC's codex plugin runtime's data location isn't
+      confirmed, so codex is skipped. Leave unset for a fully ephemeral
+      sandbox, or if install_ecc=false.
+    default: ""
 
 setup:
   install:
     - command: |
         set -euo pipefail
+
+        # `sbx env run`'s summary only shows a truncated command preview
+        # and exit code, so every failure below exits with its own code +
+        # a labelled stderr line (same convention kits/agents/claude/
+        # spec.yaml uses) — that's enough to tell which check failed
+        # without re-running with extra logging.
+        die() { echo "[agent-packages-mixin] ERROR($1): $2" >&2; exit "$1"; }
 
         AGENT=""
         for candidate in claude codex copilot pi; do
@@ -31,38 +62,80 @@ setup:
             break
           fi
         done
-        if [ -z "${AGENT}" ]; then
-          echo "[agent-packages-mixin] ERROR: no supported agent CLI (claude|codex|copilot|pi) found on PATH" >&2
-          exit 1
-        fi
+        [ -n "${AGENT}" ] \
+          || die 20 "no supported agent CLI (claude|codex|copilot|pi) found on PATH"
+
+        # sync_marketplace_plugin <name> <git-url> <ref>
+        #
+        # Converges a claude plugin marketplace + its same-named plugin to
+        # the given git ref, without erroring on a pre-existing
+        # registration the way a bare `add` would (it has no
+        # force/overwrite flag). `list --json` isn't a reliable check for
+        # "is anything already there" — it can come back empty for a
+        # project/local-scope registration that still makes `add` reject
+        # with "network source differs" — so removal before add is
+        # unconditional and best-effort whenever url+ref don't already
+        # match exactly, rather than gated on what list showed.
+        #
+        # To install another claude marketplace plugin, add another call
+        # to this function inside the `claude)` case arm below. Anything
+        # beyond marketplace+plugin install — e.g. claude-hud's
+        # statusLine/config.json wiring — is specific to that plugin and
+        # goes after its own call, following the same pattern.
+        sync_marketplace_plugin() {
+          name="$1" url="$2" ref="$3"
+          current_ref="$(claude plugin marketplace list --json \
+            | jq -r --arg n "${name}" --arg u "${url}" \
+              '.[] | select(.name == $n and .url == $u) | .ref // ""')" \
+            || die 21 "claude plugin marketplace list/jq failed for ${name}"
+          if [ "${current_ref}" != "${ref}" ]; then
+            echo "[agent-packages-mixin] converging ${name} marketplace to ${ref} (was: ${current_ref:-<none>})"
+            claude plugin marketplace remove "${name}" || true
+            claude plugin marketplace add "${url}#${ref}" \
+              || die 22 "claude plugin marketplace add ${name} failed"
+          fi
+          echo "[agent-packages-mixin] installing ${name} plugin"
+          claude plugin install "${name}@${name}" -y \
+            || die 23 "claude plugin install ${name} failed"
+        }
 
         case "${AGENT}" in
           claude)
-            VERSION="${{ kit.args.claude_hud_version }}"
+            # Isolate from a possibly bind-mounted host ~/.gitconfig, but
+            # still mark every directory safe: CLAUDE_CONFIG_DIR may itself
+            # be bind-mounted from the host (see additionalWorkspaces in
+            # the sandbox env config), so any existing .git dirs under it
+            # are owned by a different uid than this container's, which
+            # git otherwise refuses to touch ("detected dubious ownership").
+            GIT_CONFIG_GLOBAL="$(mktemp)"
+            git config --file "${GIT_CONFIG_GLOBAL}" --add safe.directory '*'
+            export GIT_CONFIG_GLOBAL
 
-            echo "[agent-packages-mixin] Adding claude-hud marketplace @ ${VERSION}"
-            claude plugin marketplace add "https://github.com/jarrodwatts/claude-hud.git#${VERSION}"
+            # claude itself resolves its config tree via CLAUDE_CONFIG_DIR,
+            # falling back to ~/.claude — match that here so this mixin
+            # writes to wherever claude is actually reading from.
+            CLAUDE_HOME="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}"
 
-            echo "[agent-packages-mixin] Installing claude-hud plugin"
-            claude plugin install claude-hud@claude-hud -y
+            sync_marketplace_plugin claude-hud \
+              "https://github.com/jarrodwatts/claude-hud.git" \
+              "${{ kit.args.claude_hud_version }}"
 
-            CACHE_ROOT="${HOME}/.claude/plugins/cache/claude-hud/claude-hud"
+            # claude-hud-specific: wire its installed dist/index.js into
+            # settings.json's statusLine, and write its own config.json.
+            CACHE_ROOT="${CLAUDE_HOME}/plugins/cache/claude-hud/claude-hud"
             INSTALLED_DIR=$(find "${CACHE_ROOT}" -mindepth 1 -maxdepth 1 -type d | head -1)
-            if [ -z "${INSTALLED_DIR}" ] || [ ! -f "${INSTALLED_DIR}/dist/index.js" ]; then
-              echo "[agent-packages-mixin] ERROR: couldn't find dist/index.js under ${CACHE_ROOT}" >&2
-              exit 1
-            fi
-            echo "[agent-packages-mixin] Installed at ${INSTALLED_DIR}"
+            [ -n "${INSTALLED_DIR}" ] && [ -f "${INSTALLED_DIR}/dist/index.js" ] \
+              || die 24 "couldn't find dist/index.js under ${CACHE_ROOT}"
 
-            SETTINGS="${HOME}/.claude/settings.json"
+            SETTINGS="${CLAUDE_HOME}/settings.json"
             mkdir -p "$(dirname "${SETTINGS}")"
             [ -f "${SETTINGS}" ] || echo '{}' > "${SETTINGS}"
             STATUSLINE_CMD="cols=\$(stty size </dev/tty 2>/dev/null | awk '{print \$2}'); export COLUMNS=\$(( \${cols:-120} > 4 ? \${cols:-120} - 4 : 1 )); exec node \"${INSTALLED_DIR}/dist/index.js\""
             jq --arg cmd "${STATUSLINE_CMD}" '.statusLine = {"type": "command", "command": $cmd}' \
-              "${SETTINGS}" > "${SETTINGS}.tmp" && mv "${SETTINGS}.tmp" "${SETTINGS}"
-            echo "[agent-packages-mixin] set statusLine in ${SETTINGS}"
+              "${SETTINGS}" > "${SETTINGS}.tmp" && mv "${SETTINGS}.tmp" "${SETTINGS}" \
+              || die 25 "failed writing statusLine to ${SETTINGS}"
 
-            HUD_CONFIG_DIR="${HOME}/.claude/plugins/claude-hud"
+            HUD_CONFIG_DIR="${CLAUDE_HOME}/plugins/claude-hud"
             mkdir -p "${HUD_CONFIG_DIR}"
             jq -n '{
               language: "en",
@@ -90,8 +163,81 @@ setup:
                 showSessionTokens: true,
                 usageBarEnabled: true
               }
-            }' > "${HUD_CONFIG_DIR}/config.json"
-            echo "[agent-packages-mixin] wrote ${HUD_CONFIG_DIR}/config.json"
+            }' > "${HUD_CONFIG_DIR}/config.json" \
+              || die 26 "failed writing ${HUD_CONFIG_DIR}/config.json"
+
+            if [ "${{ kit.args.install_ecc }}" = "true" ]; then
+              sync_marketplace_plugin ecc \
+                "https://github.com/affaan-m/ECC.git" \
+                "${{ kit.args.ecc_version }}"
+
+              # ECC's tagged releases (through at least v2.2.1) ship
+              # hooks/hooks.json with a top-level "$schema" and a
+              # per-entry "id"/"description" on every hook group.
+              # Claude Code's plugin hooks loader rejects those as
+              # unknown keys at load time (cosmetic — it still registers
+              # the hook on the fields it does recognize). ECC's own
+              # main branch has since split those keys out into a
+              # hooks.metadata.json sidecar for exactly this reason, but
+              # that split isn't in any tagged release yet, so strip the
+              # same keys here until it is.
+              ECC_CACHE_ROOT="${CLAUDE_HOME}/plugins/cache/ecc/ecc"
+              ECC_INSTALLED_DIR=$(find "${ECC_CACHE_ROOT}" -mindepth 1 -maxdepth 1 -type d | head -1)
+              [ -n "${ECC_INSTALLED_DIR}" ] && [ -f "${ECC_INSTALLED_DIR}/hooks/hooks.json" ] \
+                || die 29 "couldn't find hooks/hooks.json under ${ECC_CACHE_ROOT}"
+
+              ECC_HOOKS_JSON="${ECC_INSTALLED_DIR}/hooks/hooks.json"
+              jq 'del(.["$schema"]) | .hooks[] |= map(del(.id, .description))' \
+                "${ECC_HOOKS_JSON}" > "${ECC_HOOKS_JSON}.tmp" \
+                && mv "${ECC_HOOKS_JSON}.tmp" "${ECC_HOOKS_JSON}" \
+                || die 30 "failed sanitizing ${ECC_HOOKS_JSON}"
+
+              # Symlink ECC's own session memory to a host-mounted dir (if
+              # given) so it survives sandbox recreation. ECC_AGENT_DATA_HOME
+              # defaults to ~/.claude (same as CLAUDE_HOME here) — see
+              # https://github.com/affaan-m/ECC.
+              HOST_PERSIST_DIR="${{ kit.args.host_persist_dir }}"
+              if [ -n "${HOST_PERSIST_DIR}" ]; then
+                [ -d "${HOST_PERSIST_DIR}" ] \
+                  || die 31 "host_persist_dir=${HOST_PERSIST_DIR} does not exist (mount missing?)"
+
+                for entry in session-data:dir skills/learned:dir session-aliases.json:file; do
+                  rel="${entry%%:*}"
+                  kind="${entry##*:}"
+                  src="${HOST_PERSIST_DIR}/${rel}"
+                  dest="${CLAUDE_HOME}/${rel}"
+                  mkdir -p "$(dirname "${src}")" "$(dirname "${dest}")"
+                  if [ "${kind}" = "dir" ]; then mkdir -p "${src}"; else touch "${src}"; fi
+                  if [ -e "${dest}" ] && [ ! -L "${dest}" ]; then
+                    echo "[agent-packages-mixin] moving ${dest} aside to ${dest}.orig"
+                    mv "${dest}" "${dest}.orig"
+                  fi
+                  if [ ! -L "${dest}" ]; then
+                    echo "[agent-packages-mixin] linking ${dest} -> ${src}"
+                    ln -s "${src}" "${dest}"
+                  fi
+                done
+              fi
+            fi
+            ;;
+
+          codex)
+            if [ "${{ kit.args.install_ecc }}" = "true" ]; then
+              # Codex's marketplace add takes an owner/repo shorthand, not
+              # a url#ref like claude's — it has no documented way to pin a
+              # specific tag, only `plugin marketplace upgrade` to move to
+              # whatever's newest. Both add commands are idempotent per
+              # ECC's .codex-plugin/README.md, so no remove-before-add
+              # dance is needed here the way sync_marketplace_plugin does
+              # it for claude.
+              echo "[agent-packages-mixin] adding ecc marketplace + plugin for codex"
+              codex plugin marketplace add affaan-m/ECC \
+                || die 27 "codex plugin marketplace add ecc failed"
+              codex plugin add ecc@ecc \
+                || die 28 "codex plugin add ecc failed"
+            else
+              echo "[agent-packages-mixin] no extras defined for codex, skipping"
+            fi
             ;;
 
           pi)
@@ -106,4 +252,15 @@ setup:
             ;;
         esac
       user: "1000"
-      description: "Install per-agent extras (claude-hud for claude, npm packages for pi)"
+      description: "Install per-agent extras (claude-hud for claude, npm packages for pi, optionally ECC for claude/codex)"
+
+permissions:
+  network:
+    allow:
+      # claude-hud marketplace add clones from github.com; this repo's e2e
+      # runs every kit under `sbx policy init deny-all`, so this must be
+      # listed even though nothing here injects credentials into it.
+      - "github.com"
+      - "*.githubusercontent.com"
+      # pi install pulls packages from the npm registry.
+      - "registry.npmjs.org"

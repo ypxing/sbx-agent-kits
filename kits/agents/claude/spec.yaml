@@ -6,8 +6,8 @@ description: Claude Code agent.
 
 args:
   image:
-    description: "Full image reference, e.g. my.registry.io/claude:latest"
-    default: "docker.io/ypxing/sbx-agent:claude-docker"
+    description: "Full image reference, e.g. my.registry.io/my-base:latest"
+    default: "docker/sandbox-templates:shell-docker"
   entrypoint_cmd:
     description: >
       claude | claude-herdr. Defaults to launching claude directly; set to
@@ -16,7 +16,144 @@ args:
       managed pane instead — see README's "Optional: herdr" section.
     enum: ["claude", "claude-herdr"]
     default: "claude"
+  host_persist_dir:
+    description: >
+      Optional host directory (mounted separately, e.g. via
+      additionalWorkspaces) used to persist CLI history + resume across
+      sandbox recreation: ~/.claude/projects (session transcripts +
+      per-project memory), history.jsonl (prompt history), file-history/
+      (rewind snapshots), and paste-cache/ (pasted content referenced by
+      transcripts) are all symlinked into it. Everything else in ~/.claude
+      stays sandbox-local. Leave unset for a fully ephemeral sandbox.
+    default: ""
 
 sandbox:
   image: "${{ kit.args.image }}"
   entrypoint: ["${{ kit.args.entrypoint_cmd }}"]
+
+setup:
+  install:
+    - command: |
+        set -euo pipefail
+
+        # Installs the latest published Claude Code CLI at sandbox-creation
+        # time (rather than baking a pinned version into a custom image), so
+        # every sandbox always runs whatever's newest on npm. Base settings +
+        # guardrail hooks are bundled as static files under
+        # files/home/.claude/ (see the kit spec reference's "Static files"
+        # section) and already land in place before this step runs.
+        npm install -g @anthropic-ai/claude-code
+
+        # Belt-and-suspenders: the kit spec reference doesn't explicitly
+        # promise the hooks' executable bit survives the files/home/ copy.
+        chmod +x "${HOME}/.claude/hooks/"*.sh
+      user: "1000"
+      description: "Install Claude Code CLI"
+
+    - command: |
+        set -euo pipefail
+
+        # Claude Code's per-directory trust dialog lives in ~/.claude.json's
+        # projects map (keyed by absolute cwd), not under CLAUDE_CONFIG_DIR —
+        # pre-accepting it means a fresh sandbox never has to stop and wait
+        # on that interactive prompt.
+        #
+        # This has to run synchronously, right before the real `claude`
+        # binary starts, computing WORKDIR from its own `pwd -P` at that
+        # exact moment — not from setup.install's cwd (the kit spec
+        # reference: install commands start in the image's default WORKDIR,
+        # which "isn't necessarily the primary workspace in a direct-mounted
+        # or clone-mode sandbox"), and not as a separate setup.startup step
+        # either (the reference again: "the agent launches once startup
+        # commands have been dispatched, regardless of `background`" — i.e.
+        # startup commands race the agent's own trust check and can lose).
+        # So we shadow the real binary itself: rename it to `claude.real`
+        # and install a wrapper in its place that patches trust then execs
+        # it. entrypoint_cmd=claude and =claude-herdr both end up invoking
+        # `claude` by bare name via PATH lookup at actual launch time (see
+        # kits/mixins/herdr/spec.yaml's `exec "${AGENT}"` /
+        # `herdr agent start ... --kind "${AGENT}"`), so this covers both.
+        REAL_CLAUDE="$(command -v claude)"
+        if [ -z "${REAL_CLAUDE}" ]; then
+          echo "[claude-sbx] ERROR(14): claude binary not found on PATH after npm install" >&2
+          exit 14
+        fi
+        mv "${REAL_CLAUDE}" "${REAL_CLAUDE}.real"
+
+        cat > "${REAL_CLAUDE}" <<'WRAPPER_EOF'
+        #!/bin/sh
+        set -eu
+
+        WORKDIR="$(pwd -P)"
+        CONFIG_JSON="${HOME}/.claude.json"
+
+        if [ ! -f "${CONFIG_JSON}" ]; then
+          echo '{}' > "${CONFIG_JSON}"
+        fi
+
+        if command -v jq >/dev/null 2>&1 && jq empty "${CONFIG_JSON}" >/dev/null 2>&1; then
+          if jq --arg dir "${WORKDIR}" '
+            .hasCompletedOnboarding = true
+            | .projects[$dir].hasTrustDialogAccepted        = true
+            | .projects[$dir].hasCompletedProjectOnboarding = true
+            | .projects[$dir].projectOnboardingSeenCount    = (.projects[$dir].projectOnboardingSeenCount // 0)
+            | .projects[$dir].allowedTools                  = (.projects[$dir].allowedTools // [])
+            ' "${CONFIG_JSON}" > "${CONFIG_JSON}.tmp"; then
+            mv "${CONFIG_JSON}.tmp" "${CONFIG_JSON}"
+            chmod 600 "${CONFIG_JSON}"
+          else
+            rm -f "${CONFIG_JSON}.tmp"
+          fi
+        fi
+
+        exec __REAL_CLAUDE__ "$@"
+        WRAPPER_EOF
+
+        # Bake in the real binary's path (sed, not heredoc expansion, so
+        # $dir/$WORKDIR/etc. above stay literal for the wrapper to expand
+        # at its own runtime — same __TOKEN__ + sed pattern
+        # kits/mixins/herdr/spec.yaml uses for __AGENT__).
+        sed -i "s#__REAL_CLAUDE__#${REAL_CLAUDE}.real#" "${REAL_CLAUDE}"
+        chmod +x "${REAL_CLAUDE}"
+      user: "1000"
+      description: "Wrap the claude binary to pre-accept its trust dialog for the real workspace cwd before it starts"
+
+    - command: |
+        set -euo pipefail
+
+        # Symlink CLI history/resume state to a host-mounted dir (if given)
+        # so it survives sandbox recreation. Everything else under
+        # ~/.claude (settings, credentials, skills, plugins, CLAUDE.md)
+        # stays sandbox-local.
+        HOST_PERSIST_DIR="${{ kit.args.host_persist_dir }}"
+        if [ -n "${HOST_PERSIST_DIR}" ]; then
+          if [ ! -d "${HOST_PERSIST_DIR}" ]; then
+            echo "[claude-sbx] ERROR(20): host_persist_dir=${HOST_PERSIST_DIR} does not exist (mount missing?)" >&2
+            exit 20
+          fi
+          mkdir -p "${HOME}/.claude"
+
+          for entry in projects:dir file-history:dir paste-cache:dir history.jsonl:file; do
+            rel="${entry%%:*}"
+            kind="${entry##*:}"
+            src="${HOST_PERSIST_DIR}/${rel}"
+            dest="${HOME}/.claude/${rel}"
+            if [ "${kind}" = "dir" ]; then mkdir -p "${src}"; else touch "${src}"; fi
+            if [ -e "${dest}" ] && [ ! -L "${dest}" ]; then
+              echo "[claude-sbx] moving ${dest} aside to ${dest}.orig"
+              mv "${dest}" "${dest}.orig"
+            fi
+            if [ ! -L "${dest}" ]; then
+              echo "[claude-sbx] linking ${dest} -> ${src}"
+              ln -s "${src}" "${dest}"
+            fi
+          done
+        fi
+      user: "1000"
+      description: "Link persistent CLI history/resume state, if mounted"
+
+permissions:
+  network:
+    allow:
+      # npm install -g @anthropic-ai/claude-code, above.
+      - registry.npmjs.org

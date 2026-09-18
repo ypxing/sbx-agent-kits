@@ -6,8 +6,8 @@ description: OpenAI Codex CLI agent.
 
 args:
   image:
-    description: "Full image reference, e.g. my.registry.io/codex:latest"
-    default: "docker.io/ypxing/sbx-agent:codex-docker"
+    description: "Full image reference, e.g. my.registry.io/my-base:latest"
+    default: "docker/sandbox-templates:shell-docker"
   entrypoint_cmd:
     description: >
       codex | codex-herdr. Defaults to launching codex directly; set to
@@ -16,6 +16,19 @@ args:
       managed pane instead — see README's "Optional: herdr" section.
     enum: ["codex", "codex-herdr"]
     default: "codex"
+  host_persist_dir:
+    description: >
+      Optional host directory (mounted separately, e.g. via
+      additionalWorkspaces) to persist Codex session/memory state across
+      sandbox recreation: thread_history_1.sqlite (transcripts),
+      memories_1.sqlite (memory), state_5.sqlite (the thread index
+      `codex resume`'s picker reads — also carries device_key_bindings/
+      remote_control_enrollments, which persist too since they're not
+      separable from the index), and history.jsonl (cross-session prompt
+      input history, i.e. up-arrow recall in the interactive TUI).
+      Everything else in $CODEX_HOME (config.toml, auth.json, skills) stays
+      sandbox-local. Leave unset for a fully ephemeral sandbox.
+    default: ""
 
 sandbox:
   image: "${{ kit.args.image }}"
@@ -28,3 +41,83 @@ environment:
     # Never let git block on an interactive credential prompt — that would
     # freeze the Codex TUI. Fail fast instead.
     GIT_TERMINAL_PROMPT: "0"
+
+setup:
+  install:
+    - command: |
+        set -euo pipefail
+
+        # Installs the latest published Codex CLI at sandbox-creation time
+        # (rather than baking a pinned version into a custom image), so
+        # every sandbox always runs whatever's newest on npm. Base config +
+        # guardrail hooks are bundled as static files under
+        # files/home/.codex/ (see the kit spec reference's "Static files"
+        # section) and already land in place before this step runs.
+        npm install -g @openai/codex
+
+        # Belt-and-suspenders: the kit spec reference doesn't explicitly
+        # promise the hooks' executable bit survives the files/home/ copy.
+        chmod +x "${CODEX_HOME}/hooks/"*.sh
+      user: "1000"
+      description: "Install Codex CLI"
+
+    - command: |
+        set -euo pipefail
+
+        # Codex stores session/memory data as versioned sqlite files
+        # directly in $CODEX_HOME (no dedicated subdirectory like Claude's
+        # projects/) — thread_history_1.sqlite holds session/resume
+        # transcripts, memories_1.sqlite holds memory, and state_5.sqlite is
+        # the thread index (threads/projects/goals/jobs tables) that `codex
+        # resume`'s picker actually reads; without it, resume won't list
+        # old threads even though their transcript content is preserved.
+        # state_5.sqlite also carries device_key_bindings and
+        # remote_control_enrollments (device-pairing state, not API
+        # credentials) — not separable from the index, so they persist too.
+        # history.jsonl (unversioned, no _N suffix) holds cross-session
+        # prompt input history for the interactive TUI's up-arrow recall.
+        #
+        # The _N suffix on each sqlite filename is a per-store
+        # schema-migration generation number, versioned independently
+        # (logs_2.sqlite, goals_1.sqlite, queue_1.sqlite exist alongside
+        # these with their own numbers) — if a future codex release
+        # migrates one of these to a new generation, this list needs the
+        # new filename added; until then, persistence for that store just
+        # silently stops (codex keeps working fine against a fresh,
+        # unlinked file).
+        #
+        # -wal/-shm sqlite companion files are intentionally not symlinked:
+        # sqlite computes their path by string-suffixing the path it was
+        # opened with, not by re-resolving the symlink, so they always land
+        # sandbox-local regardless. That only risks losing the last
+        # not-yet-checkpointed turns on teardown — normal sqlite
+        # unclean-shutdown tolerance, not corruption.
+        HOST_PERSIST_DIR="${{ kit.args.host_persist_dir }}"
+        if [ -n "${HOST_PERSIST_DIR}" ]; then
+          if [ ! -d "${HOST_PERSIST_DIR}" ]; then
+            echo "[codex-sbx] ERROR(20): host_persist_dir=${HOST_PERSIST_DIR} does not exist (mount missing?)" >&2
+            exit 20
+          fi
+          mkdir -p "${CODEX_HOME}"
+          for rel in thread_history_1.sqlite memories_1.sqlite state_5.sqlite history.jsonl; do
+            src="${HOST_PERSIST_DIR}/${rel}"
+            dest="${CODEX_HOME}/${rel}"
+            touch "${src}"
+            if [ -e "${dest}" ] && [ ! -L "${dest}" ]; then
+              echo "[codex-sbx] moving ${dest} aside to ${dest}.orig"
+              mv "${dest}" "${dest}.orig"
+            fi
+            if [ ! -L "${dest}" ]; then
+              echo "[codex-sbx] linking ${dest} -> ${src}"
+              ln -s "${src}" "${dest}"
+            fi
+          done
+        fi
+      user: "1000"
+      description: "Link persistent session/memory sqlite files and command history (if mounted)"
+
+permissions:
+  network:
+    allow:
+      # npm install -g @openai/codex, above.
+      - registry.npmjs.org

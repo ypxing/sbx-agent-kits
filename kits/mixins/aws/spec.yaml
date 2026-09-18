@@ -91,11 +91,29 @@ setup:
               exit 1
             fi
 
+            # A profile name from AWS_PROFILE only resolves if the config
+            # file has a matching section — [default] doesn't count once
+            # AWS_PROFILE is set to anything else, so that section has to
+            # be named [profile <name>] instead (the AWS CLI's own syntax
+            # for every profile other than the implicit default one). Write
+            # [default] regardless, too: any caller that doesn't happen to
+            # have AWS_PROFILE in its own environment (a subprocess, a
+            # different SDK) falls back to [default], and there must be one
+            # for it to find.
+            PROFILE_NAME="${AWS_PROFILE:-default}"
+
             mkdir -p "$(dirname "${CONFIG_FILE}")"
-            printf '[sso-session live]\nsso_start_url = %s\nsso_region = %s\nsso_registration_scopes = sso:account:access\n\n[default]\nsso_session = live\nsso_role_name = %s\nsso_account_id = %s\nregion = %s\n' \
-              "${START_URL}" "${REGION}" "${ROLE_NAME}" "${ACCOUNT_ID}" "${REGION}" \
-              > "${CONFIG_FILE}"
-            echo "[aws-mixin] wrote SSO profile to ${CONFIG_FILE}"
+            {
+              printf '[sso-session live]\nsso_start_url = %s\nsso_region = %s\nsso_registration_scopes = sso:account:access\n\n' \
+                "${START_URL}" "${REGION}"
+              printf '[default]\nsso_session = live\nsso_role_name = %s\nsso_account_id = %s\nregion = %s\n' \
+                "${ROLE_NAME}" "${ACCOUNT_ID}" "${REGION}"
+              if [ "${PROFILE_NAME}" != "default" ]; then
+                printf '\n[profile %s]\nsso_session = live\nsso_role_name = %s\nsso_account_id = %s\nregion = %s\n' \
+                  "${PROFILE_NAME}" "${ROLE_NAME}" "${ACCOUNT_ID}" "${REGION}"
+              fi
+            } > "${CONFIG_FILE}"
+            echo "[aws-mixin] wrote SSO profile '${PROFILE_NAME}' (+ [default] alias) to ${CONFIG_FILE}"
           fi
         else
           echo "[aws-mixin] auth_mode=external — credentials left to the ambient chain / mounted config"
@@ -171,14 +189,14 @@ setup:
       description: "Patch the detected agent CLI to route through Bedrock when use_bedrock=true"
   startup:
     - command:
-        - sh
+        - bash
         - -c
         - |
-          if [ "${{ kit.args.auth_mode }}" = "sso" ]; then
+          if [ "${{ kit.args.auth_mode }}" = "sso" ] && [ ! -d "${HOME}/.copilot" ]; then
             command -v aws >/dev/null 2>&1 && aws sso login || true
           fi
       user: "1000"
-      description: "AWS SSO login (auth_mode=sso only, no-op otherwise)"
+      description: "AWS SSO login (auth_mode=sso only, no-op otherwise, and never for copilot which has no AWS/Bedrock use)"
 
 environment:
   variables:

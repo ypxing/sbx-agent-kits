@@ -14,19 +14,41 @@ args:
       - codex
       - pi
       - copilot
+  home_dir:
+    required: true
+    description: host home directory
 
 kits:
-  - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/agents/${{ env.args.agent }}
+  # host_persist_dir is declared by every kits/agents/*/spec.yaml, each
+  # symlinking its own agent-specific session/memory paths from it.
+  - source: git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/agents/${{ env.args.agent }}
+    args:
+      host_persist_dir: ${{ env.args.home_dir }}/.sbx/.${{ env.args.agent }}-sbx
   - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/aws
   - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/herdr
   - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/coding-crew
   - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/npm-auth
-  - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/agent-packages
+  - source: git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/agent-packages
+    args:
+      host_persist_dir: ${{ env.args.home_dir }}/.sbx/.${{ env.args.agent }}-sbx
+  - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/domains-access
 
 additionalWorkspaces:
   # avoid updates to the sbx-env folder from the sandbox
   - path: ./sbxenv.yaml
     readOnly: true
+
+  # persists each agent's session/memory state (see kits/agents/*/spec.yaml)
+  # across disposable sandbox runs. env.args.home_dir is host home.
+  - path: ${{ env.args.home_dir }}/.sbx/.${{ env.args.agent }}-sbx
+
+  - path: ${{ env.args.home_dir }}/.gitconfig
+    readOnly: true
+
+lifecycle:
+  initialize:
+    - name: Prepare agent persist dir
+      command: mkdir -p ${{ env.args.home_dir }}/.sbx/.${{ env.args.agent }}-sbx
 
 sandboxOptions:
   memory: 8g
@@ -35,6 +57,8 @@ env:
   # sandbox
   IS_SANDBOX: "1"
   SBX_NO_TELEMETRY: "1"
+
+  GIT_CONFIG_GLOBAL: ${{ env.args.home_dir }}/.gitconfig
 
   CLAUDE_CODE_USE_BEDROCK: "1"
   ANTHROPIC_DEFAULT_SONNET_MODEL: au.anthropic.claude-sonnet-5

@@ -77,8 +77,9 @@ setup:
         chmod +x "${INSTALL_DIR}/herdr.real"
 
         # Move the real binary to `herdr.real` and install a wrapper as
-        # `herdr`, matching the claude-wrapper.sh/copilot-wrapper.sh
-        # convention. Works around a herdr 0.9.0 startup race
+        # `herdr`, matching the trust-dialog wrapper pattern
+        # kits/agents/claude/spec.yaml and kits/agents/copilot/spec.yaml use
+        # for their own binaries. Works around a herdr 0.9.0 startup race
         # (https://github.com/herdrdev/herdr/issues/3777): launching the bare
         # TUI (no args) as the very first command of a freshly-created pty
         # can read a transient 0x0 terminal size and exit with "terminal
@@ -122,8 +123,8 @@ setup:
           > "${CONFIG_DIR}/config.toml"
 
         # Merges a SessionStart hook into settings.json — safe to run here
-        # since the image's own apply-config.sh has already written it at
-        # build time, long before any mixin runs at sandbox-creation time.
+        # since the agent kit's own files/home/ has already landed it in
+        # place before any setup.install step (including this mixin's) runs.
         herdr integration install "${AGENT}"
         herdr integration status | grep "^${AGENT}:"
 
@@ -163,8 +164,9 @@ setup:
         # also installed the real `herdr` binary — kept as a defensive
         # fallback in case that binary is later removed) and for the
         # `herdr agent start` invocation further down. pi has none: its
-        # baked-in config already sets defaultProjectTrust=always (see
-        # config/pi/settings.json), so no CLI flag is needed.
+        # base config already sets defaultProjectTrust=always (see
+        # kits/agents/pi/files/home/.pi/agent/settings.json), so no CLI
+        # flag is needed.
         case "${AGENT}" in
           claude)  YOLO_ARGS=(--dangerously-skip-permissions) ;;
           copilot) YOLO_ARGS=(--yolo) ;;

@@ -6,8 +6,8 @@ description: Pi coding agent on the plain shell base image.
 
 args:
   image:
-    description: "Full image reference, e.g. my.registry.io/pi:latest"
-    default: "docker.io/ypxing/sbx-agent:pi-docker"
+    description: "Full image reference, e.g. my.registry.io/my-base:latest"
+    default: "docker/sandbox-templates:shell-docker"
   entrypoint_cmd:
     description: >
       pi | pi-herdr. Defaults to launching pi directly; set to pi-herdr
@@ -16,6 +16,14 @@ args:
       see README's "Optional: herdr" section.
     enum: ["pi", "pi-herdr"]
     default: "pi"
+  host_persist_dir:
+    description: >
+      Optional host directory (mounted separately, e.g. via
+      additionalWorkspaces) to symlink as ~/.pi/agent/sessions — per-project
+      session history — so it survives sandbox recreation. Everything else
+      under ~/.pi/agent (auth.json, models-store.json) stays sandbox-local.
+      Leave unset for a fully ephemeral sandbox.
+    default: ""
 
 sandbox:
   image: "${{ kit.args.image }}"
@@ -25,3 +33,50 @@ environment:
   variables:
     PI_TELEMETRY: "0"
     PI_SKIP_VERSION_CHECK: "1"
+
+setup:
+  install:
+    - command: |
+        set -euo pipefail
+
+        # Installs the latest published Pi CLI at sandbox-creation time
+        # (rather than baking a pinned version into a custom image), so
+        # every sandbox always runs whatever's newest on npm. Base settings
+        # are bundled as a static file under files/home/.pi/agent/settings.json
+        # (see the kit spec reference's "Static files" section) and already
+        # land in place before this step runs.
+        npm install -g @earendil-works/pi-coding-agent
+      user: "1000"
+      description: "Install Pi CLI"
+
+    - command: |
+        set -euo pipefail
+
+        # Symlink ~/.pi/agent/sessions to a host-mounted dir (if given) so
+        # per-project session history survives sandbox recreation.
+        # Everything else under ~/.pi/agent stays sandbox-local.
+        HOST_PERSIST_DIR="${{ kit.args.host_persist_dir }}"
+        if [ -n "${HOST_PERSIST_DIR}" ]; then
+          if [ ! -d "${HOST_PERSIST_DIR}" ]; then
+            echo "[pi-sbx] ERROR(20): host_persist_dir=${HOST_PERSIST_DIR} does not exist (mount missing?)" >&2
+            exit 20
+          fi
+          mkdir -p "${HOME}/.pi/agent"
+          dest="${HOME}/.pi/agent/sessions"
+          if [ -e "${dest}" ] && [ ! -L "${dest}" ]; then
+            echo "[pi-sbx] moving ${dest} aside to ${dest}.orig"
+            mv "${dest}" "${dest}.orig"
+          fi
+          if [ ! -L "${dest}" ]; then
+            echo "[pi-sbx] linking ${dest} -> ${HOST_PERSIST_DIR}"
+            ln -s "${HOST_PERSIST_DIR}" "${dest}"
+          fi
+        fi
+      user: "1000"
+      description: "Link persistent sessions dir (if mounted)"
+
+permissions:
+  network:
+    allow:
+      # npm install -g @earendil-works/pi-coding-agent, above.
+      - registry.npmjs.org

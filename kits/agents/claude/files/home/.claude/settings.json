@@ -52,7 +52,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "fp=$(jq -r '.tool_input.file_path // \"\"' 2>/dev/null); base=$(basename \"$fp\"); if echo \"$base\" | grep -qE '^\\.(env|npmrc|yarnrc)'; then echo '{\"hookSpecificOutput\": {\"permissionDecision\": \"deny\"}, \"systemMessage\": \"Blocked: reading .env* / .npmrc* / .yarnrc* files is not allowed \u2014 use environment variables directly\"}' >&2; exit 2; fi"
+            "command": "fp=$(jq -r '.tool_input.file_path // \"\"' 2>/dev/null); base=$(basename \"$fp\"); if echo \"$base\" | grep -qE '^\\.(env|npmrc|yarnrc)'; then echo '{\"hookSpecificOutput\": {\"permissionDecision\": \"deny\"}, \"systemMessage\": \"Blocked: reading .env* / .npmrc* / .yarnrc* files is not allowed — use environment variables directly\"}' >&2; exit 2; fi"
           }
         ]
       },

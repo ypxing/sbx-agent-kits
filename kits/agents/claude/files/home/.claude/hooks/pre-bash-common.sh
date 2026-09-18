@@ -1,8 +1,8 @@
 # pre-bash-common.sh — shared Bash-tool guardrail checks for the claude/codex/copilot
-# PreToolUse hooks (config/<agent>/hooks/pre-bash.sh). Copied into every agent's
-# hooks/ dir by apply-config.sh; each agent's pre-bash.sh sources it and only
-# handles its own stdin-parsing and output format (their PreToolUse contracts
-# differ on both).
+# PreToolUse hooks (hooks/pre-bash.sh in each agent's home dir). This file is
+# identical across kits/agents/{claude,codex,copilot}/files/home/<agent-dir>/hooks/ —
+# each agent's pre-bash.sh sources it and only handles its own stdin-parsing and
+# output format (their PreToolUse contracts differ on both).
 #
 # Not executable / has no shebang on purpose — this is a library, always sourced.
 
