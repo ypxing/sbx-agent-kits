@@ -15,19 +15,19 @@ description: >
 args:
   version:
     description: pinned herdr.dev release to install (no leading "v")
-    default: "0.9.0"
+    default: "0.9.1"
   # Per-arch sha256 for `version`'s release asset — from
   # https://herdr.dev/latest.json's "releases" map (one entry per past
   # version, same shape as its top-level "assets"/"sha256" keys). The
-  # defaults below are for v0.9.0; when bumping `version`, pass both of
+  # defaults below are for v0.9.1; when bumping `version`, pass both of
   # these as matching --kit-arg overrides too, or the checksum check below
   # will (correctly) fail closed instead of installing an unverified binary.
   sha256_x86_64:
-    description: 'expected sha256 of "herdr-linux-x86_64" for `version` (defaults to v0.9.0''s)'
-    default: "4fa1a01158dd8043da92d31b270780b0dcc10603038d9b61cac4d81ab63fb71f"
+    description: 'expected sha256 of "herdr-linux-x86_64" for `version` (defaults to v0.9.1''s)'
+    default: "2a02fed16beb651ef006e1d43f048f652ca4dc58ad053cd2d44450563d5c54b7"
   sha256_aarch64:
-    description: 'expected sha256 of "herdr-linux-aarch64" for `version` (defaults to v0.9.0''s)'
-    default: "9c8db20fb7e7427b138d5367113f1621ffd319f2f65d6f009e2594029115f0d2"
+    description: 'expected sha256 of "herdr-linux-aarch64" for `version` (defaults to v0.9.1''s)'
+    default: "f4ccf4de745f2cb9a39a983e9ba3703dad50ec2a58dea83026ceab721bbd8d9e"
 
 setup:
   install:
