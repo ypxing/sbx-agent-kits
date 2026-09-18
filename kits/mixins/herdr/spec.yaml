@@ -309,3 +309,4 @@ permissions:
     allow:
       - "github.com"
       - "*.githubusercontent.com"
+      - "herdr.dev"
