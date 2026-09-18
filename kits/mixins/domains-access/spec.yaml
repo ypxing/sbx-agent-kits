@@ -29,6 +29,7 @@ permissions:
 
       # npm / yarn
       - "registry.npmjs.org"
+      - "www.npmjs.com"
       - "registry.yarnpkg.com"
 
       # Python
