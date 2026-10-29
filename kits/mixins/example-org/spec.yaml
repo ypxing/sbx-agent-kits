@@ -1,0 +1,54 @@
+schemaVersion: "2"
+kind: mixin
+name: example-org-mixin
+displayName: example org network access
+description: >
+  Template network allowlist for everything an organisation's engineers use
+  beyond general developer infrastructure: the org's own domains, its vendor
+  tenants, and the API hosts of the third-party products it works with
+  (Atlassian, New Relic, Figma, Slack shown here), plus the Atlassian MCP
+  server. Installs nothing — permissions only. Copy it as your own org's
+  mixin (e.g. a local kit dir) with your own domains, tenants and tools, and
+  fill in the commented-out hosts. Pairs with domains-access.
+
+permissions:
+  network:
+    allow:
+      # your org's internal domains, e.g.:
+      # - "*.your-org.example.com"
+
+      # Atlassian: Jira/Confluence REST (API-token auth), pinned to your
+      # tenant — *.atlassian.net would reach any tenant, e.g.:
+      # - "your-org.atlassian.net"
+      # Atlassian remote MCP server (https://mcp.atlassian.com/v1/sse or
+      # /v1/mcp). The server calls Jira/Confluence on its side, so
+      # api.atlassian.com isn't needed here. It serves every Atlassian
+      # tenant; the interactive login happens in the host browser, not the
+      # sandbox. If its OAuth flow needs another host, confirm it with
+      # `sbx policy log` before adding it.
+      - "mcp.atlassian.com"
+      - "developer.atlassian.com"
+
+      # New Relic: NerdGraph API and docs, US and EU regions (there is no AU
+      # region). The MCP server's host isn't verified yet — confirm it with
+      # `sbx policy log` before adding it. Ingest endpoints
+      # (collector/log-api/otlp.nr-data.net) deliberately omitted: they
+      # accept data for any account's license key. Add them in a project kit
+      # only if code under test must ship telemetry.
+      - "api.newrelic.com"
+      - "api.eu.newrelic.com"
+      - "docs.newrelic.com"
+
+      # Figma: REST API. The remote MCP server's host isn't verified yet —
+      # confirm it with `sbx policy log` before adding it. www.figma.com
+      # (the full web app) deliberately omitted.
+      - "api.figma.com"
+
+      # Slack: your workspace, Web API (slack.com/api/*) and file
+      # downloads. If agents use Slack's remote MCP server, confirm its host
+      # with `sbx policy log` and add it here. hooks.slack.com deliberately
+      # omitted: anyone's incoming-webhook URL works without auth, making it
+      # a one-request exfil path.
+      # - "your-org.slack.com"
+      - "slack.com"
+      - "files.slack.com"

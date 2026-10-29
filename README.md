@@ -50,10 +50,13 @@ each by arg name to whichever kit declares it):
 sbx env run examples/aws-sso.sbxenv.yaml \
   --kit-arg auth_mode=sso \
   --kit-arg sso_start_url=https://YOUR_ORG.awsapps.com/start \
-  --kit-arg sso_region=ap-southeast-2 \
+  --kit-arg sso_region=us-east-1 \
   --kit-arg sso_role_name=YourRoleName \
   --kit-arg sso_account_id=123456789012
 ```
+
+The aws mixin defaults to `auth_mode=external`, and
+`aws-external.sbxenv.yaml` also passes it explicitly.
 
 `npm-auth.sbxenv.yaml` needs an `NPM_TOKEN` secret set first, sourced from
 wherever you keep it — e.g. from the macOS Keychain:
@@ -102,9 +105,19 @@ Beyond the examples above, each mixin under `kits/mixins/` can help with:
 - **`apt-packages/`** — installs extra apt packages (e.g. a compiler, plus current `gh` from GitHub's apt repo) on
   top of the base image.
 - **`domains-access/`** — standalone network allowlist for AWS, GitHub
-  (incl. `*.github.io`), npm/yarn, Python/Go/Rust registries, container
-  registries, and claude/copilot/codex docs sites — add your own org's
-  domains to it. No install step — permissions only.
+  (incl. `*.github.io`), npm/yarn, Python/Go/Rust/JVM/Terraform registries,
+  container registries, and common language/platform and
+  claude/copilot/codex docs sites. No install step — permissions only.
+  Holds general developer infrastructure only and names no organisation.
+- **`example-org/`** — template for everything an org's engineers use on
+  top of `domains-access`: the org's own domains, its tenants (e.g.
+  `your-org.atlassian.net`, `your-org.slack.com`, commented out), the APIs
+  of Atlassian, New Relic, Figma and Slack, and the Atlassian MCP server.
+  Copy it as your own org's mixin with your own hosts. Permissions only.
+
+A repo needing hosts beyond these (or fewer) can add its own local kit with
+a `permissions.network.allow` list — `kits:` accepts local directories,
+e.g. `- source: ./.sbx/extra-domains`, resolved from the `sbxenv.yaml`.
 
 Each `spec.yaml` documents its own args in full.
 
@@ -131,9 +144,11 @@ kits/mixins/          sbx mixin kits — applied at sandbox-creation time
   npm-auth/            npm/yarn registry auth
   apt-packages/        extra apt packages on top of the base image
   domains-access/      standalone developer network allowlist (permissions only)
+  example-org/         template org domains, tenants + SaaS tools allowlist (permissions only)
 
 examples/             sbxenv.yaml per use case (see "Using with sbx" above)
 docs/                 getting-started guide
+tests/                bats tests for the shared pre-bash hook guardrails (`bats tests/`)
 sbxenv.yaml           Local sbx environment for this repo (workspace = .)
 LICENSE               MIT
 ```
