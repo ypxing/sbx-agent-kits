@@ -37,7 +37,7 @@ args:
     description: "e.g. https://myorg.awsapps.com/start (required when auth_mode=sso)"
     default: ""
   sso_region:
-    description: "e.g. ap-southeast-2 (required when auth_mode=sso)"
+    description: "e.g. us-east-1 (required when auth_mode=sso)"
     default: ""
   sso_role_name:
     description: "e.g. MyRole (required when auth_mode=sso)"

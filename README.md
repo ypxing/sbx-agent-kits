@@ -50,7 +50,7 @@ each by arg name to whichever kit declares it):
 sbx env run examples/aws-sso.sbxenv.yaml \
   --kit-arg auth_mode=sso \
   --kit-arg sso_start_url=https://YOUR_ORG.awsapps.com/start \
-  --kit-arg sso_region=ap-southeast-2 \
+  --kit-arg sso_region=us-east-1 \
   --kit-arg sso_role_name=YourRoleName \
   --kit-arg sso_account_id=123456789012
 ```
