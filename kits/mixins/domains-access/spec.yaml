@@ -10,21 +10,17 @@ description: >
   common language/platform docs, and the hosted docs sites for
   claude/copilot/codex. Installs nothing — permissions only. Carries its own
   copy of AWS/GitHub domains too, so it works even when composed without the
-  aws/herdr/agent-packages mixins that also grant them. Add your own org's
-  internal domains to the top of the allow list below.
+  aws/herdr/agent-packages mixins that also grant them.
 
   Scope: general developer infrastructure every repo needs (registries,
-  toolchains, language docs) plus your org's own domains. Third-party
-  products agents integrate with (Atlassian, Figma, Slack, New Relic, ...)
-  each get their own vendor mixin instead — see atlassian/, figma/, slack/,
-  newrelic/ — holding that vendor's API, MCP and docs hosts.
+  toolchains, language docs), naming no organisation. An organisation's
+  own domains, vendor tenants and the third-party products it uses
+  (Atlassian, Figma, Slack, New Relic, ...) go in that organisation's
+  mixin instead, e.g. example-org/.
 
 permissions:
   network:
     allow:
-      # your org's internal domains — add them here, e.g.:
-      # - "*.your-org.example.com"
-
       # AWS / Bedrock
       - "*.amazonaws.com"
       - "*.awsapps.com"
@@ -61,10 +57,12 @@ permissions:
       - "golang.org"
       - "dl.google.com"
 
-      # Java / JVM: Maven Central + Gradle plugin portal/distributions
+      # Java / JVM: Maven Central + Gradle plugin portal/distributions (the
+      # portal redirects plugin JAR downloads to plugins-artifacts)
       - "repo.maven.apache.org"
       - "repo1.maven.org"
       - "plugins.gradle.org"
+      - "plugins-artifacts.gradle.org"
       - "services.gradle.org"
 
       # Terraform: provider/module registry (+ provider docs) and binaries.
