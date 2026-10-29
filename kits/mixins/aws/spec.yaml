@@ -5,10 +5,16 @@ displayName: AWS CLI + auth
 description: >
   Installs AWS CLI v2, configures auth for AWS/Bedrock access, and
   optionally switches the sandbox's agent CLI to route through Bedrock.
-  auth_mode=sso writes an SSO profile (as [default]) to
-  /home/agent/.aws/config and logs in at sandbox startup — but only if
-  nobody else already owns config there: it skips writing whenever
-  AWS_CONFIG_FILE is already set, or the file already exists.
+  auth_mode=sso writes an SSO profile to /home/agent/.aws/config and logs
+  in at sandbox startup — but only if nobody else already owns config
+  there: it skips writing whenever AWS_CONFIG_FILE is already set, or the
+  file already exists. It's always written as [default]; if AWS_PROFILE
+  is already set in the sandbox's env, the same credentials are also
+  written as [profile $AWS_PROFILE], so that value resolves too instead of
+  erroring as a missing profile. The startup login itself is skipped when
+  kits/agents/claude/'s awsAuthRefresh arg was set (checked by reading
+  ~/.claude/settings.json) — claude owns its own login/refresh in that
+  case, and running both would be redundant.
   auth_mode=external installs the CLI only and leaves credentials to
   whatever's already present — env vars, a container/instance role, or a
   mounted config file. use_bedrock=true additionally patches codex or pi
@@ -17,7 +23,10 @@ description: >
   into the image, since a Bedrock routing config with no AWS credentials
   behind it can't do anything anyway. claude needs no patch: set
   CLAUDE_CODE_USE_BEDROCK=1 (and ANTHROPIC_DEFAULT_*_MODEL as needed)
-  directly in your sbxenv.yaml's env: block instead.
+  directly in your sbxenv.yaml's env: block instead. copilot has no
+  Bedrock backend at all — use_bedrock=true is a no-op for it (logged,
+  not an error), so it's safe to compose aws-mixin with any agent kit
+  without tuning use_bedrock per agent.
 
 args:
   auth_mode:
@@ -37,7 +46,7 @@ args:
     description: "e.g. 123456789012 (required when auth_mode=sso)"
     default: ""
   use_bedrock:
-    description: "true | false — patch the detected codex/pi CLI's config to route through AWS Bedrock. Not applicable to claude — set CLAUDE_CODE_USE_BEDROCK=1 directly in your sbxenv.yaml's env: block instead"
+    description: "true | false — patch the detected codex/pi CLI's config to route through AWS Bedrock. No-op for claude (set CLAUDE_CODE_USE_BEDROCK=1 directly in your sbxenv.yaml's env: block instead) and for copilot (no Bedrock backend) — safe to set to true regardless of which agent kit you compose this with"
     enum: ["true", "false"]
     default: "false"
   bedrock_region:
@@ -135,6 +144,11 @@ setup:
           exit 0
         fi
 
+        if [ -d "${HOME}/.copilot" ]; then
+          echo "[aws-mixin] copilot has no Bedrock backend — use_bedrock=true has no effect for it. Skipping the patch." >&2
+          exit 0
+        fi
+
         AGENT=""
         for candidate in codex pi; do
           if command -v "${candidate}" >/dev/null 2>&1; then
@@ -143,7 +157,7 @@ setup:
           fi
         done
         if [ -z "${AGENT}" ]; then
-          echo "[aws-mixin] ERROR: use_bedrock=true but no Bedrock-capable agent CLI (codex|pi) found on PATH — copilot has no Bedrock backend" >&2
+          echo "[aws-mixin] ERROR: use_bedrock=true but no Bedrock-capable agent CLI (codex|pi) found on PATH" >&2
           exit 1
         fi
 
@@ -193,7 +207,16 @@ setup:
         - -c
         - |
           if [ "${{ kit.args.auth_mode }}" = "sso" ] && [ ! -d "${HOME}/.copilot" ]; then
-            command -v aws >/dev/null 2>&1 && aws sso login || true
+            CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
+            AWS_AUTH_REFRESH=""
+            if [ -f "${CLAUDE_SETTINGS}" ] && command -v jq >/dev/null 2>&1; then
+              AWS_AUTH_REFRESH=$(jq -r '.awsAuthRefresh // ""' "${CLAUDE_SETTINGS}" 2>/dev/null || true)
+            fi
+            if [ -n "${AWS_AUTH_REFRESH}" ]; then
+              echo "[aws-mixin] awsAuthRefresh is set in ${CLAUDE_SETTINGS} — claude handles its own login/refresh, skipping mixin-managed aws sso login"
+            else
+              command -v aws >/dev/null 2>&1 && aws sso login || true
+            fi
           fi
       user: "1000"
       description: "AWS SSO login (auth_mode=sso only, no-op otherwise, and never for copilot which has no AWS/Bedrock use)"

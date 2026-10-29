@@ -8,14 +8,6 @@ args:
   image:
     description: "Full image reference, e.g. my.registry.io/my-base:latest"
     default: "docker/sandbox-templates:shell-docker"
-  entrypoint_cmd:
-    description: >
-      copilot | copilot-herdr. Defaults to launching copilot directly; set
-      to copilot-herdr once the kits/mixins/herdr/ mixin kit is applied,
-      to boot through a headless herdr server with copilot running as a
-      managed pane instead — see README's "Optional: herdr" section.
-    enum: ["copilot", "copilot-herdr"]
-    default: "copilot"
   host_persist_dir:
     description: >
       Optional host directory (mounted separately, e.g. via
@@ -28,10 +20,17 @@ args:
       and ~/.cache/copilot (downloaded binaries) stays sandbox-local. Leave
       unset for a fully ephemeral sandbox.
     default: ""
+  awsAuthRefresh:
+    description: >
+      Unused by this kit — declared as a no-op so callers that switch
+      between agent kits (e.g. sbxenv.yaml's env.args.agent) can pass the
+      same arg regardless of which agent is selected. Only kits/agents/
+      claude/ actually applies it.
+    default: ""
 
 sandbox:
   image: "${{ kit.args.image }}"
-  entrypoint: ["${{ kit.args.entrypoint_cmd }}"]
+  entrypoint: ["copilot"]
 
 setup:
   install:
@@ -104,16 +103,13 @@ setup:
         # startup commands race the agent's own trust check and can lose).
         # So we shadow the real binary itself: rename it to `copilot.real`
         # and install a wrapper in its place that patches trust then execs
-        # it. entrypoint_cmd=copilot and =copilot-herdr both end up invoking
-        # `copilot` by bare name via PATH lookup at actual launch time (see
-        # kits/mixins/herdr/spec.yaml's `exec "${AGENT}"` /
-        # `herdr agent start ... --kind "${AGENT}"`), so this covers both.
-        # (Same approach as kits/agents/claude/spec.yaml.)
-        REAL_COPILOT="$(command -v copilot)"
-        if [ -z "${REAL_COPILOT}" ]; then
+        # it. The sandbox's entrypoint execs `copilot` by bare name via PATH
+        # lookup, so this wrapper is what actually runs at launch. (Same
+        # approach as kits/agents/claude/spec.yaml.)
+        REAL_COPILOT="$(command -v copilot)" || {
           echo "[copilot-sbx] ERROR(14): copilot binary not found on PATH after npm install" >&2
           exit 14
-        fi
+        }
         mv "${REAL_COPILOT}" "${REAL_COPILOT}.real"
 
         cat > "${REAL_COPILOT}" <<'WRAPPER_EOF'
@@ -154,8 +150,7 @@ setup:
 
         # Bake in the real binary's path (sed, not heredoc expansion, so
         # $dir/$WORKDIR/etc. above stay literal for the wrapper to expand
-        # at its own runtime — same __TOKEN__ + sed pattern
-        # kits/mixins/herdr/spec.yaml uses for __AGENT__).
+        # at its own runtime instead).
         sed -i "s#__REAL_COPILOT__#${REAL_COPILOT}.real#" "${REAL_COPILOT}"
         chmod +x "${REAL_COPILOT}"
       user: "1000"

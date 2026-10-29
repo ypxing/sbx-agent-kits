@@ -4,13 +4,13 @@ name: domains-access-mixin
 displayName: developer network allowlist
 description: >
   Adds a standalone network allowlist for common developer domains:
-  AWS/Bedrock, GitHub (incl. github.io pages, where many projects deploy
-  OpenAPI/API docs), npm/yarn, Python/Go/Rust package registries, container
-  registries, and the hosted docs sites for claude/copilot/codex. Installs
-  nothing — permissions only. Carries its own copy of AWS/GitHub domains
-  too, so it works even when composed without the aws/herdr/agent-packages
-  mixins that also grant them. Add your own org's internal domains to the
-  bottom of the allow list below.
+  AWS/Bedrock, GitHub (incl. github.io pages, where many
+  projects deploy OpenAPI/API docs), npm/yarn/pnpm, Python/Go/Rust package
+  registries, container registries, and the hosted docs sites for
+  claude/copilot/codex. Installs nothing — permissions only. Carries its own
+  copy of AWS/GitHub domains too, so it works even when composed without the
+  aws/herdr/agent-packages mixins that also grant them. Add your own org's
+  internal domains to the top of the allow list below.
 
 permissions:
   network:
@@ -22,15 +22,19 @@ permissions:
       - "*.amazonaws.com"
       - "*.awsapps.com"
 
+      # Serverless Framework
+      - "*.serverless.com"
+
       # GitHub (repos, releases, raw content, github.io pages e.g. OpenAPI docs)
       - "github.com"
       - "*.githubusercontent.com"
       - "*.github.io"
 
-      # npm / yarn
+      # npm / yarn / pnpm
       - "registry.npmjs.org"
       - "www.npmjs.com"
       - "registry.yarnpkg.com"
+      - "*.pnpm.io"
 
       # Python
       - "pypi.org"

@@ -1,0 +1,57 @@
+schemaVersion: "2"
+kind: mixin
+name: apt-packages-mixin
+displayName: extra apt packages
+description: >
+  Installs extra Debian/Ubuntu packages via `apt-get` on top of whatever
+  base image the sandbox uses. Use this for build toolchains or other
+  system packages the base image doesn't already ship (e.g. a compiler
+  needed by an npm package's native build step).
+
+args:
+  packages:
+    description: space-separated list of apt package names to install
+    default: "g++ bats zip"
+  github_cli:
+    description: "true | false — install the GitHub CLI (`gh`) from GitHub's official apt repo instead of Ubuntu's stale distro package"
+    default: "true"
+
+setup:
+  install:
+    - command: |
+        set -euo pipefail
+
+        PACKAGES="${{ kit.args.packages }}"
+        GITHUB_CLI="${{ kit.args.github_cli }}"
+        # shellcheck disable=SC2086
+        set -- ${PACKAGES}
+
+        if [ "${GITHUB_CLI}" = "true" ]; then
+          # Runs as root, so no sudo. Ubuntu's distro `gh` lags badly; add
+          # GitHub's signed apt repo so `apt install gh` is current.
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates curl
+          mkdir -p -m 755 /etc/apt/keyrings
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            -o /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            > /etc/apt/sources.list.d/github-cli.list
+          set -- "$@" gh
+        fi
+
+        if [ "$#" -eq 0 ]; then
+          echo "[apt-packages-mixin] nothing to install"
+          exit 0
+        fi
+
+        apt update
+        apt install -y "$@"
+      user: "0"
+      description: "apt install extra packages"
+
+permissions:
+  network:
+    allow:
+      # GitHub CLI apt repo + signing key (github_cli=true).
+      - "cli.github.com"

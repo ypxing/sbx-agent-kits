@@ -8,28 +8,43 @@ description: >
   https://github.com/ypxing/coding-crew
 
 args:
-  version:
-    description: coding-crew version tag to install (e.g. "1.2.3"), or "latest"
-    default: latest
+  ref:
+    description: coding-crew git ref (branch or tag) to install
+    default: main
 
 setup:
   install:
     - command: |
         set -euo pipefail
-        VERSION="${version:-latest}"
-        AGENT=""
-        for candidate in claude codex copilot pi; do
-          if command -v "${candidate}" >/dev/null 2>&1; then
-            AGENT="${candidate}"
-            break
-          fi
+
+        # Distinct exit code + labelled stderr per failure (sbx only shows the exit code).
+        die() { echo "[coding-crew] ERROR($1): $2" >&2; exit "$1"; }
+
+        REF="${{ kit.args.ref }}"
+        AGENT="" SKILLS_AGENT=""
+        # candidate CLI : agent id used by `npx skills add --agent`
+        for pair in claude:claude-code codex:codex copilot:github-copilot pi:pi; do
+          cli="${pair%%:*}"
+          command -v "${cli}" >/dev/null && { AGENT="${cli}"; SKILLS_AGENT="${pair#*:}"; break; }
         done
-        if [ -z "${AGENT}" ]; then
-          echo "[coding-crew] ERROR: no supported agent CLI (claude|codex|copilot|pi) found on PATH" >&2
-          exit 1
-        fi
-        echo "[coding-crew] Installing coding-crew skills (${AGENT} @ ${VERSION})"
-        curl -fsSL https://raw.githubusercontent.com/ypxing/coding-crew/main/bootstrap.sh \
-          | bash -s -- "${AGENT}" --version "${VERSION}"
+        [ -n "${AGENT}" ] \
+          || die 10 "no supported agent CLI (claude|codex|copilot|pi) found on PATH"
+
+        echo "[coding-crew] Installing coding-crew skills (${AGENT} @ ${REF})"
+
+        # Isolate from the bind-mounted host ~/.gitconfig (GIT_CONFIG_GLOBAL in
+        # the sandbox env config): a host `url."git@github.com:".insteadOf`
+        # rewrite turns the HTTPS clone into SSH, which has no keys or
+        # known_hosts in the sandbox ("Host key verification failed").
+        # Agent-specific (--agent), user-level (--global), non-interactive (--yes).
+        GIT_CONFIG_GLOBAL=/dev/null npx --yes skills add "https://github.com/ypxing/coding-crew.git#${REF}" \
+          --agent "${SKILLS_AGENT}" --skill '*' --global --yes \
+          || die 11 "skills add failed for agent=${SKILLS_AGENT} ref=${REF}"
       user: "1000"
       description: "Install coding-crew skills for the detected agent CLI"
+
+permissions:
+  network:
+    allow:
+      - "github.com"
+      - "registry.npmjs.org"

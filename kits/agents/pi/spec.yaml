@@ -8,14 +8,6 @@ args:
   image:
     description: "Full image reference, e.g. my.registry.io/my-base:latest"
     default: "docker/sandbox-templates:shell-docker"
-  entrypoint_cmd:
-    description: >
-      pi | pi-herdr. Defaults to launching pi directly; set to pi-herdr
-      once the kits/mixins/herdr/ mixin kit is applied, to boot through a
-      headless herdr server with pi running as a managed pane instead —
-      see README's "Optional: herdr" section.
-    enum: ["pi", "pi-herdr"]
-    default: "pi"
   host_persist_dir:
     description: >
       Optional host directory (mounted separately, e.g. via
@@ -24,10 +16,18 @@ args:
       under ~/.pi/agent (auth.json, models-store.json) stays sandbox-local.
       Leave unset for a fully ephemeral sandbox.
     default: ""
+  awsAuthRefresh:
+    description: >
+      Unused by this kit — declared as a no-op so callers that switch
+      between agent kits (e.g. sbxenv.yaml's env.args.agent) can pass the
+      same arg regardless of which agent is selected. Only kits/agents/
+      claude/ actually applies it.
+    default: ""
 
 sandbox:
   image: "${{ kit.args.image }}"
-  entrypoint: ["${{ kit.args.entrypoint_cmd }}"]
+  entrypoint: ["pi"]
+
 
 environment:
   variables:
