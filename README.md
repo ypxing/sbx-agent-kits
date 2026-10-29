@@ -55,6 +55,9 @@ sbx env run examples/aws-sso.sbxenv.yaml \
   --kit-arg sso_account_id=123456789012
 ```
 
+The aws mixin defaults to `auth_mode=external`, and
+`aws-external.sbxenv.yaml` also passes it explicitly.
+
 `npm-auth.sbxenv.yaml` needs an `NPM_TOKEN` secret set first, sourced from
 wherever you keep it — e.g. from the macOS Keychain:
 
@@ -102,9 +105,16 @@ Beyond the examples above, each mixin under `kits/mixins/` can help with:
 - **`apt-packages/`** — installs extra apt packages (e.g. a compiler, plus current `gh` from GitHub's apt repo) on
   top of the base image.
 - **`domains-access/`** — standalone network allowlist for AWS, GitHub
-  (incl. `*.github.io`), npm/yarn, Python/Go/Rust registries, container
-  registries, and claude/copilot/codex docs sites — add your own org's
-  domains to it. No install step — permissions only.
+  (incl. `*.github.io`), npm/yarn, Python/Go/Rust/JVM/Terraform registries,
+  container registries, and common language/platform and
+  claude/copilot/codex docs sites — add your own org's domains to it. No
+  install step — permissions only. Holds general developer infrastructure
+  only; third-party products get their own vendor mixin.
+- **`atlassian/`**, **`newrelic/`**, **`figma/`**, **`slack/`** — one
+  network allowlist per third-party product (API, MCP and docs hosts). Add
+  your own Atlassian tenant / Slack workspace to those two, and add only
+  the mixins a repo needs (the root `sbxenv.yaml` lists all of them; delete
+  what you don't use). Permissions only.
 
 Each `spec.yaml` documents its own args in full.
 
@@ -131,9 +141,14 @@ kits/mixins/          sbx mixin kits — applied at sandbox-creation time
   npm-auth/            npm/yarn registry auth
   apt-packages/        extra apt packages on top of the base image
   domains-access/      standalone developer network allowlist (permissions only)
+  atlassian/           opt-in Jira/Confluence + Atlassian MCP allowlist (permissions only)
+  newrelic/            opt-in New Relic API/MCP allowlist (permissions only)
+  figma/               opt-in Figma API/MCP allowlist (permissions only)
+  slack/               opt-in Slack API allowlist (permissions only)
 
 examples/             sbxenv.yaml per use case (see "Using with sbx" above)
 docs/                 getting-started guide
+tests/                bats tests for the shared pre-bash hook guardrails (`bats tests/`)
 sbxenv.yaml           Local sbx environment for this repo (workspace = .)
 LICENSE               MIT
 ```

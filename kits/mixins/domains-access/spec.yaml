@@ -5,12 +5,19 @@ displayName: developer network allowlist
 description: >
   Adds a standalone network allowlist for common developer domains:
   AWS/Bedrock, GitHub (incl. github.io pages, where many
-  projects deploy OpenAPI/API docs), npm/yarn/pnpm, Python/Go/Rust package
-  registries, container registries, and the hosted docs sites for
+  projects deploy OpenAPI/API docs), npm/yarn/pnpm and Node downloads,
+  Python/Go/Rust/JVM/Terraform package registries, container registries,
+  common language/platform docs, and the hosted docs sites for
   claude/copilot/codex. Installs nothing — permissions only. Carries its own
   copy of AWS/GitHub domains too, so it works even when composed without the
   aws/herdr/agent-packages mixins that also grant them. Add your own org's
   internal domains to the top of the allow list below.
+
+  Scope: general developer infrastructure every repo needs (registries,
+  toolchains, language docs) plus your org's own domains. Third-party
+  products agents integrate with (Atlassian, Figma, Slack, New Relic, ...)
+  each get their own vendor mixin instead — see atlassian/, figma/, slack/,
+  newrelic/ — holding that vendor's API, MCP and docs hosts.
 
 permissions:
   network:
@@ -36,12 +43,35 @@ permissions:
       - "registry.yarnpkg.com"
       - "*.pnpm.io"
 
+      # Node.js downloads (nvm / toolchain installs)
+      - "nodejs.org"
+
       # Python
       - "pypi.org"
       - "files.pythonhosted.org"
 
-      # Go
+      # Go: module proxy + checksum DB (go mod fails verification without
+      # sum.golang.org), govulncheck DB, docs, and toolchain downloads
+      # (go.dev/dl redirects to dl.google.com).
       - "proxy.golang.org"
+      - "sum.golang.org"
+      - "vuln.go.dev"
+      - "pkg.go.dev"
+      - "go.dev"
+      - "golang.org"
+      - "dl.google.com"
+
+      # Java / JVM: Maven Central + Gradle plugin portal/distributions
+      - "repo.maven.apache.org"
+      - "repo1.maven.org"
+      - "plugins.gradle.org"
+      - "services.gradle.org"
+
+      # Terraform: provider/module registry (+ provider docs) and binaries.
+      # app.terraform.io (HCP Terraform) deliberately omitted: it accepts
+      # state uploads to any org.
+      - "registry.terraform.io"
+      - "releases.hashicorp.com"
 
       # Rust
       - "crates.io"
@@ -62,3 +92,7 @@ permissions:
       # AWS docs
       - "docs.aws.amazon.com"
       - "aws.amazon.com"
+
+      # language / platform docs agents look things up in
+      - "developer.mozilla.org"
+      - "www.typescriptlang.org"

@@ -1,0 +1,16 @@
+schemaVersion: "2"
+kind: mixin
+name: figma-mixin
+displayName: Figma network access
+description: >
+  Opt-in network allowlist for Figma: the REST API and the remote MCP
+  server. Installs nothing — permissions only. Kept out of domains-access
+  like every third-party product (see its scope note); these
+  hosts serve any account, not just your org's.
+
+permissions:
+  network:
+    allow:
+      - "api.figma.com"
+      - "mcp.figma.com"
+      # www.figma.com (the full web app) deliberately omitted.

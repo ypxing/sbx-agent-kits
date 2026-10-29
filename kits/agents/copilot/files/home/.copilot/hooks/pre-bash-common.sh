@@ -64,38 +64,74 @@ aws_write_detected() {
 
 # --- git push: allow pushing feature branches, block push to main/master ---
 # Returns 0 (true) if any `git push` invocation targets (or, when the
-# refspec is unspecified, would push) the main/master branch.
+# refspec is unspecified, would push) the main/master branch. The `git`
+# binary may be given by path (/usr/bin/git) and followed by global options
+# (-c k=v, -C dir, --git-dir=..., --no-pager, ...) before the `push`.
 # Reads $segments, set by pre_bash_command_blocked below.
 git_push_protected() {
-  local seg rest tok last_ref positional_count unspecified cur
+  local seg split tok next is_push positional_count last_ref unspecified cur
+  local -a toks rest repo_args
   while IFS= read -r seg; do
-    case "$seg" in
-      git\ push|git\ push[[:space:]]*) ;;
-      *) continue ;;
-    esac
-    rest=${seg#git push}
+    read -r -a toks <<< "$seg"
+    [ "${#toks[@]}" -gt 0 ] || continue
+    [ "${toks[0]##*/}" = "git" ] || continue
+    # re-split honouring shell quotes (`-c 'user.name=CI Bot'` is one value);
+    # xargs parses quotes without running anything. Unbalanced quotes we
+    # can't parse -> fail closed if the segment mentions push at all.
+    if ! split=$(xargs -r printf '%s\n' <<< "$seg" 2>/dev/null) || [ -z "$split" ]; then
+      case " $seg " in *[[:space:]]push[[:space:]]*) return 0 ;; esac
+      continue
+    fi
+    mapfile -t toks <<< "$split"
+    # skip git's global options; -c/-C/--git-dir/--work-tree/--namespace/
+    # --config-env may take their value as the next token. Repository
+    # selection (-C, --git-dir, --work-tree) is kept, in order, to resolve
+    # HEAD in the repo actually being pushed; -c is never replayed since a
+    # config value (e.g. core.fsmonitor) can run code.
+    next=""; is_push=0; rest=(); repo_args=()
+    for tok in "${toks[@]:1}"; do
+      if [ "$is_push" = 1 ]; then rest+=("$tok"); continue; fi
+      case "$next" in
+        repo) repo_args+=("$tok"); next=""; continue ;;
+        skip) next=""; continue ;;
+      esac
+      case "$tok" in
+        -C|--git-dir|--work-tree) repo_args+=("$tok"); next=repo ;;
+        --git-dir=*|--work-tree=*) repo_args+=("$tok") ;;
+        -c|--namespace|--config-env|--super-prefix) next=skip ;;
+        -*) ;;
+        push) is_push=1 ;;
+        *) break ;;   # some other subcommand
+      esac
+    done
+    [ "$is_push" = 1 ] || continue
     # --all / --mirror push every branch, including protected ones
-    case " $rest " in
+    case " ${rest[*]} " in
       *' --all '*|*' --mirror '*) return 0 ;;
     esac
-    last_ref=""
+    # first positional is the remote, every later one a refspec; a leading
+    # `+` (force) or `src:` doesn't change the destination's name
     positional_count=0
-    for tok in $rest; do
+    last_ref=""
+    for tok in "${rest[@]}"; do
       case "$tok" in -*) continue ;; esac
       positional_count=$((positional_count + 1))
+      [ "$positional_count" -ge 2 ] || continue
       last_ref="$tok"
+      tok=${tok#+}
+      case "$tok" in
+        main|master|refs/heads/main|refs/heads/master|*:main|*:master|*:refs/heads/main|*:refs/heads/master)
+          return 0 ;;
+      esac
     done
-    case "$last_ref" in
-      main|master|refs/heads/main|refs/heads/master|*:main|*:master|*:refs/heads/main|*:refs/heads/master)
-        return 0 ;;
-    esac
     # `git push`, `git push <remote>` or `git push <remote> HEAD` don't name a
-    # destination branch explicitly -> they push whatever is checked out now.
+    # destination branch explicitly -> they push whatever is checked out now
+    # (in the repo the -C/--git-dir/--work-tree options select).
     unspecified=0
     [ "$positional_count" -le 1 ] && unspecified=1
-    [ "$last_ref" = "HEAD" ] && unspecified=1
+    [ "${last_ref#+}" = "HEAD" ] && unspecified=1
     if [ "$unspecified" = 1 ]; then
-      cur=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+      cur=$(git "${repo_args[@]}" symbolic-ref --short HEAD 2>/dev/null)
       case "$cur" in main|master) return 0 ;; esac
     fi
   done <<< "$segments"
