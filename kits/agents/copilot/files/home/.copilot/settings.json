@@ -1,6 +1,5 @@
 {
   "deniedUrls": [],
-  "defaultPermissionMode": "allow-all",
   "copyOnSelect": true,
   "hooks": {
     "preToolUse": [

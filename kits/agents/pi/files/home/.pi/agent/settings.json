@@ -3,6 +3,7 @@
   "defaultProjectTrust": "always",
   "defaultModel": "au.anthropic.claude-sonnet-5",
   "defaultThinkingLevel": "high",
+  "defaultTools": ["+codemode"],
   "compaction": {
     "enabled": true,
     "reserveTokens": 16384,

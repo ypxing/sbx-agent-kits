@@ -1,5 +1,6 @@
 {
   "trustedFolders": [],
+  "defaultPermissionMode": "allow-all",
   "appTipShown": true,
   "reasoningSummariesCleanupDone": true
 }

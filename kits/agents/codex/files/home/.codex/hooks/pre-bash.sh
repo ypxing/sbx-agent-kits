@@ -11,6 +11,6 @@ if pre_bash_command_blocked "$cmd"; then
   # Codex's PreToolUse command-hook contract treats exit code 2 as "blocked",
   # using stderr verbatim as the reason shown to the model (no JSON envelope
   # required — that's only for the exit-0/stdout decision path).
-  echo "Blocked: make *deploy*, git push to main/master, non-read-only aws commands (only describe-/list-/get-/head-/lookup-/search-/query/scan/tail/ls are allowed), docker compose *deploy*, rm -rf, wget, reading .env*/.npmrc*/.yarnrc* files, destructive SQL (UPDATE/DELETE/DROP/TRUNCATE/ALTER DROP)" >&2
+  echo "Blocked: make *deploy*, git push to main/master, non-read-only aws commands (only describe-/list-/get-/head-/lookup-/search-/query/scan/tail/ls are allowed), docker compose *deploy*, wget, reading .env*/.npmrc*/.yarnrc* files, destructive SQL (UPDATE/DELETE/DROP/TRUNCATE/ALTER DROP)" >&2
   exit 2
 fi

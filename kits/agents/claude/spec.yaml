@@ -8,28 +8,32 @@ args:
   image:
     description: "Full image reference, e.g. my.registry.io/my-base:latest"
     default: "docker/sandbox-templates:shell-docker"
-  entrypoint_cmd:
-    description: >
-      claude | claude-herdr. Defaults to launching claude directly; set to
-      claude-herdr once the kits/mixins/herdr/ mixin kit is applied, to
-      boot through a headless herdr server with claude running as a
-      managed pane instead — see README's "Optional: herdr" section.
-    enum: ["claude", "claude-herdr"]
-    default: "claude"
   host_persist_dir:
     description: >
       Optional host directory (mounted separately, e.g. via
       additionalWorkspaces) used to persist CLI history + resume across
       sandbox recreation: ~/.claude/projects (session transcripts +
-      per-project memory), history.jsonl (prompt history), file-history/
-      (rewind snapshots), and paste-cache/ (pasted content referenced by
-      transcripts) are all symlinked into it. Everything else in ~/.claude
-      stays sandbox-local. Leave unset for a fully ephemeral sandbox.
+      per-project memory), ~/.claude/plans (saved plans), ~/.claude/tasks
+      (background workflow/cron run state), ~/.claude/teams (agent-teams
+      state), history.jsonl (prompt history), file-history/ (rewind
+      snapshots), and paste-cache/ (pasted content referenced by
+      transcripts) are all symlinked into it. Everything else in
+      ~/.claude stays sandbox-local — notably sessions/, which is
+      PID-keyed and only meaningful to the live process that wrote it.
+      Leave unset for a fully ephemeral sandbox.
+    default: ""
+  awsAuthRefresh:
+    description: >
+      Optional value written as the top-level "awsAuthRefresh" field in
+      ~/.claude/settings.json (e.g. "aws sso login"). If AWS_PROFILE is
+      set in the sandbox's env and this value doesn't already include
+      "--profile", " --profile ${AWS_PROFILE}" is appended to it. Leave
+      unset to omit the field entirely.
     default: ""
 
 sandbox:
   image: "${{ kit.args.image }}"
-  entrypoint: ["${{ kit.args.entrypoint_cmd }}"]
+  entrypoint: ["claude"]
 
 setup:
   install:
@@ -69,15 +73,12 @@ setup:
         # startup commands race the agent's own trust check and can lose).
         # So we shadow the real binary itself: rename it to `claude.real`
         # and install a wrapper in its place that patches trust then execs
-        # it. entrypoint_cmd=claude and =claude-herdr both end up invoking
-        # `claude` by bare name via PATH lookup at actual launch time (see
-        # kits/mixins/herdr/spec.yaml's `exec "${AGENT}"` /
-        # `herdr agent start ... --kind "${AGENT}"`), so this covers both.
-        REAL_CLAUDE="$(command -v claude)"
-        if [ -z "${REAL_CLAUDE}" ]; then
+        # it. The sandbox's entrypoint execs `claude` by bare name via PATH
+        # lookup, so this wrapper is what actually runs at launch.
+        REAL_CLAUDE="$(command -v claude)" || {
           echo "[claude-sbx] ERROR(14): claude binary not found on PATH after npm install" >&2
           exit 14
-        fi
+        }
         mv "${REAL_CLAUDE}" "${REAL_CLAUDE}.real"
 
         cat > "${REAL_CLAUDE}" <<'WRAPPER_EOF'
@@ -86,24 +87,50 @@ setup:
 
         WORKDIR="$(pwd -P)"
         CONFIG_JSON="${HOME}/.claude.json"
+        CONFIG_LOCK="${CONFIG_JSON}.lock"
 
         if [ ! -f "${CONFIG_JSON}" ]; then
           echo '{}' > "${CONFIG_JSON}"
         fi
 
-        if command -v jq >/dev/null 2>&1 && jq empty "${CONFIG_JSON}" >/dev/null 2>&1; then
-          if jq --arg dir "${WORKDIR}" '
-            .hasCompletedOnboarding = true
-            | .projects[$dir].hasTrustDialogAccepted        = true
-            | .projects[$dir].hasCompletedProjectOnboarding = true
-            | .projects[$dir].projectOnboardingSeenCount    = (.projects[$dir].projectOnboardingSeenCount // 0)
-            | .projects[$dir].allowedTools                  = (.projects[$dir].allowedTools // [])
-            ' "${CONFIG_JSON}" > "${CONFIG_JSON}.tmp"; then
-            mv "${CONFIG_JSON}.tmp" "${CONFIG_JSON}"
-            chmod 600 "${CONFIG_JSON}"
-          else
-            rm -f "${CONFIG_JSON}.tmp"
+        patch_trust() {
+          if command -v jq >/dev/null 2>&1 && jq empty "${CONFIG_JSON}" >/dev/null 2>&1; then
+            # mktemp gives each invocation its own tmp file rather than a
+            # fixed name, so the final mv below is a safe atomic rename
+            # even if the flock guard around this function is ever bypassed.
+            CONFIG_JSON_TMP="$(mktemp "${CONFIG_JSON}.XXXXXX")"
+            if jq --arg dir "${WORKDIR}" '
+              .hasCompletedOnboarding = true
+              | .projects[$dir].hasTrustDialogAccepted        = true
+              | .projects[$dir].hasCompletedProjectOnboarding = true
+              | .projects[$dir].projectOnboardingSeenCount    = (.projects[$dir].projectOnboardingSeenCount // 0)
+              | .projects[$dir].allowedTools                  = (.projects[$dir].allowedTools // [])
+              ' "${CONFIG_JSON}" > "${CONFIG_JSON_TMP}"; then
+              mv "${CONFIG_JSON_TMP}" "${CONFIG_JSON}"
+              chmod 600 "${CONFIG_JSON}"
+            else
+              rm -f "${CONFIG_JSON_TMP}"
+            fi
           fi
+        }
+
+        # Concurrent `claude` launches sharing this $HOME (e.g. crew-afk's
+        # parallel `claude -p` subprocesses, one per worktree) all read-
+        # modify-write this same ${CONFIG_JSON} — flock serializes that
+        # against every other wrapper invocation. Bounded wait so a
+        # stuck/dead lock holder can't block this launch forever; missing
+        # flock (unlikely, but check anyway rather than assume) falls back
+        # to patching unlocked, same as before this guard existed.
+        if command -v flock >/dev/null 2>&1; then
+          exec 9>"${CONFIG_LOCK}"
+          if flock -w 10 9; then
+            patch_trust
+          else
+            echo "[claude-sbx] WARN: timed out waiting for ${CONFIG_LOCK}, skipping trust patch for this launch" >&2
+          fi
+          exec 9>&-
+        else
+          patch_trust
         fi
 
         exec __REAL_CLAUDE__ "$@"
@@ -111,8 +138,7 @@ setup:
 
         # Bake in the real binary's path (sed, not heredoc expansion, so
         # $dir/$WORKDIR/etc. above stay literal for the wrapper to expand
-        # at its own runtime — same __TOKEN__ + sed pattern
-        # kits/mixins/herdr/spec.yaml uses for __AGENT__).
+        # at its own runtime instead).
         sed -i "s#__REAL_CLAUDE__#${REAL_CLAUDE}.real#" "${REAL_CLAUDE}"
         chmod +x "${REAL_CLAUDE}"
       user: "1000"
@@ -133,7 +159,7 @@ setup:
           fi
           mkdir -p "${HOME}/.claude"
 
-          for entry in projects:dir file-history:dir paste-cache:dir history.jsonl:file; do
+          for entry in projects:dir plans:dir tasks:dir teams:dir file-history:dir paste-cache:dir history.jsonl:file; do
             rel="${entry%%:*}"
             kind="${entry##*:}"
             src="${HOST_PERSIST_DIR}/${rel}"
@@ -151,6 +177,24 @@ setup:
         fi
       user: "1000"
       description: "Link persistent CLI history/resume state, if mounted"
+
+    - command: |
+        set -euo pipefail
+
+        AWS_AUTH_REFRESH="${{ kit.args.awsAuthRefresh }}"
+        if [ -n "${AWS_AUTH_REFRESH}" ]; then
+          if [ -n "${AWS_PROFILE:-}" ]; then
+            case "${AWS_AUTH_REFRESH}" in
+              *--profile*) ;;
+              *) AWS_AUTH_REFRESH="${AWS_AUTH_REFRESH} --profile ${AWS_PROFILE}" ;;
+            esac
+          fi
+          SETTINGS="${HOME}/.claude/settings.json"
+          jq --arg v "${AWS_AUTH_REFRESH}" '.awsAuthRefresh = $v' "${SETTINGS}" > "${SETTINGS}.tmp"
+          mv "${SETTINGS}.tmp" "${SETTINGS}"
+        fi
+      user: "1000"
+      description: "Set awsAuthRefresh in settings.json, if given"
 
 permissions:
   network:

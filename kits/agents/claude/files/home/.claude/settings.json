@@ -7,6 +7,11 @@
   "copyOnSelect": true,
   "themeId": 1,
   "outputStyle": "Concise",
+  "disableBundledSkills": true,
+  "disableWorkflows": true,
+  "disableRemoteControl": true,
+  "disableClaudeAiConnectors": true,
+  "disableArtifact": true,
   "bypassPermissionsModeAccepted": true,
   "skipDangerousModePermissionPrompt": true,
   "model": "sonnet",
@@ -18,6 +23,7 @@
   "teammateMode": "in-process",
   "permissions": {
     "defaultMode": "bypassPermissions",
+    "disableAutoMode": "disable",
 
     "allow": [
       "Read",
@@ -42,7 +48,15 @@
       "Bash(make *deploy*)",
       "Bash(docker compose *deploy*)",
       "Bash(wget *)",
-      "Bash(rm -rf *)"
+      "DesignSync",
+      "NotebookEdit",
+      "PushNotification",
+      "RemoteTrigger",
+      "ReportFindings",
+      "ScheduleWakeup",
+      "CronCreate",
+      "CronDelete",
+      "CronList"
     ]
   },
   "hooks": {
