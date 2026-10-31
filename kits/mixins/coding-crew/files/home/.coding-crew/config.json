@@ -1,0 +1,12 @@
+{
+  "tracker": {
+    "kind": "local"
+  },
+  "solveFeature": {
+    "publish": false,
+    "models": {
+      "coder": "claude-sonnet-5-5",
+      "reviewer": "claude-opus-5-5"
+    }
+  }
+}
