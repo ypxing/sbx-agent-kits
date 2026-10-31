@@ -88,6 +88,10 @@ permissions:
       - "platform.openai.com"
       - "cursor.com" # cursor.com/docs
 
+      # skills directory (`npx skills find` / browsing skill listings)
+      - "skills.sh"
+      - "www.skills.sh"
+
       # AWS docs
       - "docs.aws.amazon.com"
       - "aws.amazon.com"
