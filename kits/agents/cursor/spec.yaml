@@ -151,6 +151,11 @@ permissions:
       - api2.cursor.sh
       - api2direct.cursor.sh
       - api.cursor.com
+      # Agent requests: the backend's server config points the CLI at these
+      # (agent., agentn., agent.us., agent.global. ... .api5.cursor.sh, per
+      # Cursor's network-configuration docs) rather than api2.cursor.sh.
+      - api5.cursor.sh
+      - "*.api5.cursor.sh"
       # Codebase indexing (the CLI's default --repo-endpoint).
       - repo42.cursor.sh
       #
@@ -159,8 +164,7 @@ permissions:
       # exception reports) — telemetry the CLI works without.
       #
       # TODO(cursor-extraction): the hosts above come from reading the CLI
-      # bundle, not a live run. The backend can also hand the CLI agent
-      # endpoints at runtime (agentUrl/agentnUrl). Confirm or widen from a
+      # bundle and Cursor's docs, not a live run. Confirm or widen from a
       # live run under deny-all:
       #
       #   sbx run --kit ./cursor cursor   # then attempt a prompt

@@ -15,7 +15,8 @@ args:
   ref:
     description: >
       dotfiles git ref (branch, tag or commit sha) to install. A commit sha
-      freezes every skill, plugin and package version it pins.
+      fixes which pins it installs; skill sources are pinned by tag only,
+      so a tag moved upstream still changes what they install.
     default: main
 
 setup:

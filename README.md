@@ -107,7 +107,7 @@ Beyond the examples above, each mixin under `kits/mixins/` can help with:
   `install.sh` for the sandbox's agent: its pinned skills (e.g.
   [coding-crew](https://github.com/ypxing/coding-crew)), plus the claude-hud
   statusline for claude and extra packages for pi. `--kit-arg ref=<sha>`
-  freezes every version it pins.
+  fixes which pins it installs (skill sources are pinned by tag only).
 - **`npm-auth/`** — private npm/yarn registry auth via an `NPM_TOKEN`
   secret.
 - **`apt-packages/`** — installs extra apt packages (e.g. a compiler, plus current `gh` from GitHub's apt repo) on
