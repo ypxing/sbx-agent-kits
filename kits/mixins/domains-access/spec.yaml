@@ -8,9 +8,9 @@ description: >
   projects deploy OpenAPI/API docs), npm/yarn/pnpm and Node downloads,
   Python/Go/Rust/JVM/Terraform package registries, container registries,
   common language/platform docs, and the hosted docs sites for
-  claude/copilot/codex. Installs nothing — permissions only. Carries its own
+  claude/copilot/codex/cursor. Installs nothing — permissions only. Carries its own
   copy of AWS/GitHub domains too, so it works even when composed without the
-  aws/herdr/agent-packages mixins that also grant them.
+  aws/herdr/dotfiles mixins that also grant them.
 
   Scope: general developer infrastructure every repo needs (registries,
   toolchains, language docs), naming no organisation. An organisation's
@@ -86,6 +86,7 @@ permissions:
       - "docs.claude.com"
       - "docs.github.com"
       - "platform.openai.com"
+      - "cursor.com" # cursor.com/docs
 
       # AWS docs
       - "docs.aws.amazon.com"

@@ -32,6 +32,11 @@ sandbox:
   image: "${{ kit.args.image }}"
   entrypoint: ["copilot"]
 
+environment:
+  variables:
+    # Read by kits/mixins/dotfiles/ to pick this agent's skills/packages.
+    SBX_AGENT: copilot
+
 setup:
   install:
     - command: |

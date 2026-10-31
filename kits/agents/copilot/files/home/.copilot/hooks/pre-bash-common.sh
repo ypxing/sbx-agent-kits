@@ -1,6 +1,6 @@
-# pre-bash-common.sh — shared Bash-tool guardrail checks for the claude/codex/copilot
+# pre-bash-common.sh — shared Bash-tool guardrail checks for the claude/codex/copilot/cursor
 # PreToolUse hooks (hooks/pre-bash.sh in each agent's home dir). This file is
-# identical across kits/agents/{claude,codex,copilot}/files/home/<agent-dir>/hooks/ —
+# identical across kits/agents/{claude,codex,copilot,cursor}/files/home/<agent-dir>/hooks/ —
 # each agent's pre-bash.sh sources it and only handles its own stdin-parsing and
 # output format (their PreToolUse contracts differ on both).
 #

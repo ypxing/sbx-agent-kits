@@ -31,6 +31,8 @@ sandbox:
 
 environment:
   variables:
+    # Read by kits/mixins/dotfiles/ to pick this agent's skills/packages.
+    SBX_AGENT: pi
     PI_TELEMETRY: "0"
     PI_SKIP_VERSION_CHECK: "1"
 

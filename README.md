@@ -1,18 +1,20 @@
 # sbx-agent-kits
 
-Run **Claude Code**, **OpenAI Codex**, **GitHub Copilot**, or **Pi** in
-full-autonomy mode — skip the approval prompts, but keep every agent boxed
+Run **Claude Code**, **OpenAI Codex**, **GitHub Copilot**, **Pi**, or
+**Cursor** in full-autonomy mode — skip the approval prompts, but keep every agent boxed
 in: a disposable [`sbx`](https://docs.docker.com/ai/sandboxes/) sandbox with
 its own network allowlist and scoped credential injection, thrown away when
 the session ends. There's no custom image to build or publish — each kit
 starts from the public `docker/sandbox-templates` base and installs its
-agent CLI at sandbox-creation time via `npm install -g`, so every sandbox
-always runs whatever's newest on npm.
+agent CLI at sandbox-creation time via `npm install -g` (Cursor, which isn't
+on npm, via its own installer), so every sandbox always runs whatever's
+newest.
 
 Each `kits/agents/<agent>/` kit installs exactly one agent CLI, plus its
-config/hooks, at sandbox-creation time. AWS auth/Bedrock routing,
-coding-crew skills, and a checksum-pinned [herdr](https://herdr.dev) binary
-are layered on top the same way via `sbx` mixin kits.
+config/hooks, at sandbox-creation time. AWS auth/Bedrock routing, skills
+and agent extras from [dotfiles](https://github.com/ypxing/dotfiles), and a
+checksum-pinned [herdr](https://herdr.dev) binary are layered on top the
+same way via `sbx` mixin kits.
 
 New to `sbx`? [`docs/getting-started.md`](docs/getting-started.md) walks
 through the one-off host setup and daily use.
@@ -67,7 +69,7 @@ security find-generic-password -s npm-token -w \
 ```
 
 This repo's own `sbxenv.yaml` (at the root) is a fuller example: it lets you
-pick any of the four agents (`--env-arg agent=codex`) and layers in every
+pick any of the five agents (`--env-arg agent=codex`) and layers in every
 mixin at once, bar the `example-org/` template — useful as a reference for
 building your own, but the `examples/` above are the ones to start from.
 
@@ -75,7 +77,7 @@ building your own, but the `examples/` above are the ones to start from.
 
 Each `kits/agents/<agent>/files/home/` bundles that agent's base settings +
 hooks as static files, landed in its home dir (`~/.claude`, `~/.codex`,
-`~/.copilot`, `~/.pi/agent`) before `setup.install` runs — including a
+`~/.copilot`, `~/.pi/agent`, `~/.cursor`) before `setup.install` runs — including a
 shared `pre-bash.sh` guardrail hook; see the `pre-bash-common.sh` next to
 it in each kit for the full list of blocked commands.
 
@@ -87,6 +89,11 @@ intentional, not an oversight: the sandbox's network allowlist and
 the disposable container/scoped credentials limit the blast radius if it
 still goes off the rails.
 
+Cursor is the one agent whose telemetry can't be fully switched off: the
+CLI sends usage analytics through `api2.cursor.sh`, the same host it needs
+to work, with no setting to disable it. Its kit leaves the separate metrics,
+crash-report and feature-flag hosts off the allowlist.
+
 ## Mixin reference
 
 Beyond the examples above, each mixin under `kits/mixins/` can help with:
@@ -96,10 +103,14 @@ Beyond the examples above, each mixin under `kits/mixins/` can help with:
 - **`herdr/`** — installs a checksum-pinned [herdr](https://herdr.dev)
   binary only; nothing is wired up automatically, run it yourself via
   `sbx exec -it <sandbox> herdr ...`.
-- **`coding-crew/`** — installs
-  [coding-crew](https://github.com/ypxing/coding-crew) skills.
-- **`agent-packages/`** — per-agent extras (claude-hud statusline for
-  claude, extra npm packages for pi).
+- **`dotfiles/`** — runs a dotfiles repo's `install.sh` for the sandbox's
+  agent. The default, [ypxing/dotfiles](https://github.com/ypxing/dotfiles),
+  installs its pinned skills (e.g.
+  [coding-crew](https://github.com/ypxing/coding-crew)), plus the claude-hud
+  statusline for claude and extra packages for pi. Point `repo` at your own
+  (an `install.sh` at its root taking the agent id: `claude-code`, `codex`,
+  `github-copilot`, `pi` or `cursor`); `ref=<sha>` fixes which of its pins
+  install.
 - **`npm-auth/`** — private npm/yarn registry auth via an `NPM_TOKEN`
   secret.
 - **`apt-packages/`** — installs extra apt packages (e.g. a compiler, plus current `gh` from GitHub's apt repo) on
@@ -107,7 +118,7 @@ Beyond the examples above, each mixin under `kits/mixins/` can help with:
 - **`domains-access/`** — standalone network allowlist for AWS, GitHub
   (incl. `*.github.io`), npm/yarn, Python/Go/Rust/JVM/Terraform registries,
   container registries, and common language/platform and
-  claude/copilot/codex docs sites. No install step — permissions only.
+  claude/copilot/codex/cursor docs sites. No install step — permissions only.
   Holds general developer infrastructure only and names no organisation.
 - **`example-org/`** — template for everything an org's engineers use on
   top of `domains-access`: the org's own domains, its tenants (e.g.
@@ -138,9 +149,8 @@ kits/agents/<agent>/
                       [kit spec reference](https://docs.docker.com/ai/sandboxes/customize/kit-reference/))
 
 kits/mixins/          sbx mixin kits — applied at sandbox-creation time
-  agent-packages/      per-agent extras: claude-hud for claude, npm packages for pi
   aws/                 AWS CLI/auth + optional Bedrock routing
-  coding-crew/         coding-crew skills
+  dotfiles/            skills + per-agent extras from a dotfiles repo
   herdr/               checksum-pinned herdr binary install (run manually)
   npm-auth/            npm/yarn registry auth
   apt-packages/        extra apt packages on top of the base image
@@ -155,5 +165,5 @@ LICENSE               MIT
 ```
 
 There's no Dockerfile or image build/publish step — every kit installs its
-agent CLI via `npm install -g` at sandbox-creation time, straight from npm,
-so it always picks up whatever's newest.
+agent CLI at sandbox-creation time, via `npm install -g` straight from npm
+(Cursor via `cursor.com/install`), so it always picks up whatever's newest.

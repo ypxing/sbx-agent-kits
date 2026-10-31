@@ -1,6 +1,6 @@
 # Getting started with Docker Sandboxes (`sbx`) and these kits
 
-Run a coding agent (Claude, Codex, Copilot, Pi) in a disposable, network-restricted
+Run a coding agent (Claude, Codex, Copilot, Pi, Cursor) in a disposable, network-restricted
 Docker sandbox, configured by the kits in this repo.
 
 ## One-off setup
@@ -53,6 +53,20 @@ security find-generic-password -s npm-token -w | xargs -I {} \
                         --value {}
 ```
 
+**Cursor API key** (optional, for `--env-arg agent=cursor`) — create one in
+the [Cursor dashboard](https://cursor.com/dashboard/api), then:
+
+```
+security find-generic-password -s cursor-api-key -w | xargs -I {} \
+  sbx secret set-custom --host api2.cursor.sh \
+                        --env CURSOR_API_KEY \
+                        --value {}
+```
+
+Without one, sign in from inside the sandbox with `agent login` instead: it
+prints a URL to open in your browser. That login is kept in the sandbox only,
+so a recreated sandbox needs it again.
+
 **GitHub token** (re-run when it expires)
 
 ```
@@ -82,7 +96,7 @@ sbx env run ~/.sbx --env-arg workspace=${PWD} --env-arg home_dir=${HOME}
 ```
 
 Pick another agent with `--env-arg agent=codex` (`claude` is the default; also
-`pi`, `copilot`). The sandbox is named `<agent>-sbx-<folder>`, e.g.
+`pi`, `copilot`, `cursor`). The sandbox is named `<agent>-sbx-<folder>`, e.g.
 `claude-sbx-my-app`.
 
 Agent session/memory state persists in `~/.sbx/.<agent>-sbx` on the host.
@@ -126,7 +140,7 @@ ssh claude-sbx-my-app.sbx -- echo hello
 
 `sbxenv.yaml` layers these kits on top of the agent (see the
 [README](../README.md#mixin-reference) for details): AWS CLI + Bedrock routing,
-herdr, coding-crew skills, npm auth, extra apt packages, agent extras, and a
+herdr, dotfiles skills and agent extras, npm auth, extra apt packages, and a
 network allowlist for common developer domains.
 
 Lighter-weight starting points are in [`examples/`](../examples).

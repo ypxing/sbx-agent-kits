@@ -24,9 +24,12 @@ description: >
   behind it can't do anything anyway. claude needs no patch: set
   CLAUDE_CODE_USE_BEDROCK=1 (and ANTHROPIC_DEFAULT_*_MODEL as needed)
   directly in your sbxenv.yaml's env: block instead. copilot has no
-  Bedrock backend at all — use_bedrock=true is a no-op for it (logged,
-  not an error), so it's safe to compose aws-mixin with any agent kit
-  without tuning use_bedrock per agent.
+  Bedrock backend, and cursor's runs through Cursor's own servers (static
+  keys or a team IAM role set up with `agent bedrock` / the Cursor
+  dashboard), not the sandbox's AWS credentials — use_bedrock=true is a
+  no-op for both (logged, not an error), and neither gets the SSO login, so
+  it's safe to compose aws-mixin with any agent kit without tuning
+  use_bedrock per agent.
 
 args:
   auth_mode:
@@ -46,7 +49,7 @@ args:
     description: "e.g. 123456789012 (required when auth_mode=sso)"
     default: ""
   use_bedrock:
-    description: "true | false — patch the detected codex/pi CLI's config to route through AWS Bedrock. No-op for claude (set CLAUDE_CODE_USE_BEDROCK=1 directly in your sbxenv.yaml's env: block instead) and for copilot (no Bedrock backend) — safe to set to true regardless of which agent kit you compose this with"
+    description: "true | false — patch the detected codex/pi CLI's config to route through AWS Bedrock. No-op for claude (set CLAUDE_CODE_USE_BEDROCK=1 directly in your sbxenv.yaml's env: block instead) and for copilot (no Bedrock backend) and cursor (Bedrock runs through Cursor's servers, set up with `agent bedrock`) — safe to set to true regardless of which agent kit you compose this with"
     enum: ["true", "false"]
     default: "false"
   bedrock_region:
@@ -149,6 +152,16 @@ setup:
           exit 0
         fi
 
+        # cursor's Bedrock mode runs through Cursor's servers, with static
+        # keys or a team IAM role (`agent bedrock`, or the Cursor
+        # dashboard). It takes no session token, so the SSO credentials
+        # this mixin provides can't drive it, and there's no local config
+        # to patch.
+        if [ -d "${HOME}/.cursor" ]; then
+          echo "[aws-mixin] cursor's Bedrock mode runs through Cursor's servers (set it up with \`agent bedrock\`) — use_bedrock=true has no effect for it. Skipping the patch." >&2
+          exit 0
+        fi
+
         AGENT=""
         for candidate in codex pi; do
           if command -v "${candidate}" >/dev/null 2>&1; then
@@ -206,7 +219,7 @@ setup:
         - bash
         - -c
         - |
-          if [ "${{ kit.args.auth_mode }}" = "sso" ] && [ ! -d "${HOME}/.copilot" ]; then
+          if [ "${{ kit.args.auth_mode }}" = "sso" ] && [ ! -d "${HOME}/.copilot" ] && [ ! -d "${HOME}/.cursor" ]; then
             CLAUDE_SETTINGS="${HOME}/.claude/settings.json"
             AWS_AUTH_REFRESH=""
             if [ -f "${CLAUDE_SETTINGS}" ] && command -v jq >/dev/null 2>&1; then
@@ -219,7 +232,7 @@ setup:
             fi
           fi
       user: "1000"
-      description: "AWS SSO login (auth_mode=sso only, no-op otherwise, and never for copilot which has no AWS/Bedrock use)"
+      description: "AWS SSO login (auth_mode=sso only, no-op otherwise, and never for copilot/cursor, which can't use the sandbox's AWS credentials)"
 
 environment:
   variables:

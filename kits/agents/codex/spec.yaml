@@ -37,6 +37,8 @@ sandbox:
 
 environment:
   variables:
+    # Read by kits/mixins/dotfiles/ to pick this agent's skills/packages.
+    SBX_AGENT: codex
     CODEX_HOME: /home/agent/.codex
     BROWSER: xdg-open
     # Never let git block on an interactive credential prompt — that would

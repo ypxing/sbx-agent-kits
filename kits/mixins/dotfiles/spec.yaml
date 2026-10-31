@@ -1,0 +1,97 @@
+schemaVersion: "2"
+kind: mixin
+name: dotfiles-mixin
+displayName: dotfiles (skills, plugins, packages)
+description: >
+  Clones a dotfiles repo (default https://github.com/ypxing/dotfiles) and
+  runs its install.sh for whichever agent the sandbox is running. With the
+  default repo that installs the skills in its sources.txt (coding-crew,
+  ...) and skills/ for every agent; for claude, the plugins in
+  claude-plugins.txt (claude-hud, commit-pinned and wired into the status
+  line) plus claude/claude-hud.json; for pi, the packages in
+  pi-packages.txt.
+
+  To use your own, point `repo` at it: it needs an executable install.sh at
+  its root that takes one agent id — claude-code, codex, github-copilot, pi
+  or cursor — as its argument, and must be reachable on github.com (or add
+  its host to the network allowlist in your own kit).
+
+args:
+  repo:
+    description: >
+      HTTPS git URL of the dotfiles repo to install, cloned without
+      credentials (a private repo needs its own credential injection).
+    default: https://github.com/ypxing/dotfiles.git
+  ref:
+    description: >
+      Git ref (branch, tag or commit sha) of `repo` to install. A commit sha
+      fixes which pins it installs; skill sources are pinned by tag only,
+      so a tag moved upstream still changes what they install.
+    default: main
+
+setup:
+  install:
+    - command: |
+        set -euo pipefail
+
+        # Distinct exit code + labelled stderr per failure (sbx only shows the exit code).
+        die() { echo "[dotfiles] ERROR($1): $2" >&2; exit "$1"; }
+
+        # The agent kit names itself in SBX_AGENT; probe PATH if it didn't.
+        # cursor's kit entrypoint is cursor-sbx-agent, a less ambiguous
+        # name to look for than its bare `agent` binary.
+        AGENT="${SBX_AGENT:-}"
+        if [ -z "${AGENT}" ]; then
+          for pair in claude:claude codex:codex copilot:copilot pi:pi cursor:cursor-sbx-agent; do
+            command -v "${pair#*:}" >/dev/null && { AGENT="${pair%%:*}"; break; }
+          done
+        fi
+        # sandbox agent name : agent id install.sh (npx skills -a) uses
+        case "${AGENT}" in
+          claude) SKILLS_AGENT=claude-code ;;
+          copilot) SKILLS_AGENT=github-copilot ;;
+          codex|pi|cursor) SKILLS_AGENT="${AGENT}" ;;
+          "") die 10 "no supported agent (claude|codex|copilot|pi|cursor) found" ;;
+          *) die 10 "unsupported agent '${AGENT}'" ;;
+        esac
+
+        REPO="${{ kit.args.repo }}"
+        REF="${{ kit.args.ref }}"
+        echo "[dotfiles] Installing ${REPO} @ ${REF} for ${SKILLS_AGENT}"
+
+        # Isolate from the bind-mounted host ~/.gitconfig (GIT_CONFIG_GLOBAL in
+        # the sandbox env config): a host `url."git@github.com:".insteadOf`
+        # rewrite turns HTTPS clones into SSH, which has no keys or
+        # known_hosts in the sandbox ("Host key verification failed"). Still
+        # mark every directory safe: CLAUDE_CONFIG_DIR may itself be
+        # bind-mounted from the host, so .git dirs under it (plugin
+        # marketplaces) are owned by a different uid than this container's,
+        # which git otherwise refuses to touch ("detected dubious ownership").
+        GIT_CONFIG_GLOBAL="$(mktemp)"
+        git config --file "${GIT_CONFIG_GLOBAL}" --add safe.directory '*'
+        export GIT_CONFIG_GLOBAL
+
+        DOTFILES="$(mktemp -d)"
+        git -C "${DOTFILES}" init -q
+        git -C "${DOTFILES}" fetch -q --depth 1 "${REPO}" "${REF}" \
+          || die 11 "couldn't fetch ${REPO} @ ${REF}"
+        git -C "${DOTFILES}" checkout -q FETCH_HEAD
+
+        [ -x "${DOTFILES}/install.sh" ] \
+          || die 13 "${REPO} @ ${REF} has no executable install.sh at its root"
+        "${DOTFILES}/install.sh" "${SKILLS_AGENT}" \
+          || die 12 "install.sh from ${REPO} @ ${REF} failed for ${SKILLS_AGENT}"
+        rm -rf "${DOTFILES}"
+      user: "1000"
+      description: "Install dotfiles skills, plugins and packages for the sandbox's agent"
+
+permissions:
+  network:
+    allow:
+      # dotfiles clone, skills sources and claude plugin marketplaces; this
+      # repo's e2e runs every kit under `sbx policy init deny-all`, so these
+      # must be listed even though nothing here injects credentials.
+      - "github.com"
+      - "*.githubusercontent.com"
+      # npx skills, and pi install's packages.
+      - "registry.npmjs.org"
