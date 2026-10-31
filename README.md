@@ -68,8 +68,8 @@ security find-generic-password -s npm-token -w \
 
 This repo's own `sbxenv.yaml` (at the root) is a fuller example: it lets you
 pick any of the four agents (`--env-arg agent=codex`) and layers in every
-mixin at once — useful as a reference for building your own, but the
-`examples/` above are the ones to start from.
+mixin at once, bar the `example-org/` template — useful as a reference for
+building your own, but the `examples/` above are the ones to start from.
 
 ## Config layering
 
@@ -113,7 +113,8 @@ Beyond the examples above, each mixin under `kits/mixins/` can help with:
   top of `domains-access`: the org's own domains, its tenants (e.g.
   `your-org.atlassian.net`, `your-org.slack.com`, commented out), the APIs
   of Atlassian, New Relic, Figma and Slack, and the Atlassian MCP server.
-  Copy it as your own org's mixin with your own hosts. Permissions only.
+  Copy it as your own org's mixin with your own hosts; it isn't meant to be
+  used as-is, and this repo's `sbxenv.yaml` doesn't. Permissions only.
 
 A repo needing hosts beyond these (or fewer) can add its own local kit with
 a `permissions.network.allow` list — `kits:` accepts local directories,
