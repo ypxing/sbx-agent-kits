@@ -40,7 +40,10 @@ setup:
         # The agent kit names itself in SBX_AGENT; probe PATH if it didn't.
         # cursor's kit entrypoint is cursor-sbx-agent, a less ambiguous
         # name to look for than its bare `agent` binary.
+        # sbx may report the kit name (claude-sbx, ...) rather than the env
+        # value the kit sets, so accept both.
         AGENT="${SBX_AGENT:-}"
+        AGENT="${AGENT%-sbx}"
         if [ -z "${AGENT}" ]; then
           for pair in claude:claude codex:codex copilot:copilot pi:pi cursor:cursor-sbx-agent; do
             command -v "${pair#*:}" >/dev/null && { AGENT="${pair%%:*}"; break; }
