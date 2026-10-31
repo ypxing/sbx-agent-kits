@@ -35,6 +35,11 @@ sandbox:
   image: "${{ kit.args.image }}"
   entrypoint: ["claude"]
 
+environment:
+  variables:
+    # Read by kits/mixins/dotfiles/ to pick this agent's skills/packages.
+    SBX_AGENT: claude
+
 setup:
   install:
     - command: |

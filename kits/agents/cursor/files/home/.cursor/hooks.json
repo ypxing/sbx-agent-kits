@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "hooks": {
+    "beforeShellExecution": [
+      {
+        "command": "./hooks/pre-bash.sh",
+        "timeout": 30,
+        "failClosed": true
+      }
+    ]
+  }
+}

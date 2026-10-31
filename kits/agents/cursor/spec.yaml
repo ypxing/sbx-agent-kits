@@ -1,0 +1,167 @@
+schemaVersion: "2"
+kind: sandbox
+name: cursor-sbx
+displayName: Cursor Agent
+description: Cursor Agent CLI with CURSOR_API_KEY auth.
+
+args:
+  image:
+    description: "Full image reference, e.g. my.registry.io/my-base:latest"
+    default: "docker/sandbox-templates:shell-docker"
+  host_persist_dir:
+    description: >
+      Optional host directory (mounted separately, e.g. via
+      additionalWorkspaces) used to persist Cursor session state across
+      sandbox recreation: ~/.cursor/chats (per-workspace conversation
+      stores, which `agent resume` / `agent ls` read) and ~/.cursor/projects
+      (per-workspace transcripts and the workspace-trust marker) are
+      symlinked into it. Everything else in ~/.cursor (cli-config.json, auth
+      credentials, hooks, skills) stays sandbox-local. Leave unset for a
+      fully ephemeral sandbox.
+    default: ""
+  awsAuthRefresh:
+    description: >
+      Unused by this kit — declared as a no-op so callers that switch
+      between agent kits (e.g. sbxenv.yaml's env.args.agent) can pass the
+      same arg regardless of which agent is selected. Only kits/agents/
+      claude/ actually applies it.
+    default: ""
+
+sandbox:
+  image: "${{ kit.args.image }}"
+  entrypoint: ["cursor-sbx-agent"]
+
+environment:
+  variables:
+    # Read by kits/mixins/dotfiles/ to pick this agent's skills/packages.
+    SBX_AGENT: cursor
+    # `agent login` prints its URL instead of trying to open a browser.
+    NO_OPEN_BROWSER: "1"
+
+setup:
+  install:
+    - command: |
+        set -euo pipefail
+
+        # Cursor Agent isn't published to npm: its installer downloads the
+        # newest build from downloads.cursor.com into
+        # ~/.local/share/cursor-agent/versions/<build>/ and symlinks
+        # ~/.local/bin/agent (plus the legacy cursor-agent) to it, so every
+        # sandbox runs whatever's newest, as the npm-installed kits do. The
+        # CLI then keeps itself current the same way. Base config + the
+        # guardrail hook are bundled as static files under files/home/.cursor/
+        # (see the kit spec reference's "Static files" section) and already
+        # land in place before this step runs.
+        curl -fsS https://cursor.com/install | bash
+
+        [ -x "${HOME}/.local/bin/agent" ] || {
+          echo "[cursor-sbx] ERROR(13): ${HOME}/.local/bin/agent missing after install" >&2
+          exit 13
+        }
+
+        # Belt-and-suspenders: the kit spec reference doesn't explicitly
+        # promise the hooks' executable bit survives the files/home/ copy.
+        chmod +x "${HOME}/.cursor/hooks/"*.sh
+      user: "1000"
+      description: "Install Cursor Agent CLI"
+
+    - command: |
+        set -euo pipefail
+
+        # Cursor's workspace trust prompt is answered by a marker file,
+        # ${CURSOR_DATA_DIR:-~/.cursor}/projects/<slug>/.workspace-trusted,
+        # where <slug> is the workspace's absolute path with every run of
+        # non-alphanumerics turned into one "-" (the CLI's own --trust flag
+        # writes it too, but only applies in headless --print runs).
+        #
+        # As in kits/agents/claude/spec.yaml, this has to happen right before
+        # the real binary starts, from its own `pwd -P` — setup.install's cwd
+        # isn't necessarily the workspace, and setup.startup races the
+        # agent's own trust check. Unlike there, the real binary can't be
+        # renamed and shadowed: ~/.local/bin is first on PATH and the CLI's
+        # self-update re-creates ~/.local/bin/agent. So the wrapper gets its
+        # own name, cursor-sbx-agent, in npm's global bin dir (on PATH), and
+        # is the sandbox's entrypoint; it writes the marker and execs the real
+        # ~/.local/bin/agent. `agent` run by hand via `sbx exec` skips it.
+        BIN_DIR="$(npm prefix -g)/bin"
+        mkdir -p "${BIN_DIR}"
+
+        cat > "${BIN_DIR}/cursor-sbx-agent" <<'WRAPPER_EOF'
+        #!/bin/sh
+        set -eu
+
+        WORKDIR="$(pwd -P)"
+        SLUG="$(printf '%s' "${WORKDIR}" | sed -E 's/[^a-zA-Z0-9]+/-/g; s/^-+//; s/-+$//')"
+        MARKER_DIR="${CURSOR_DATA_DIR:-${HOME}/.cursor}/projects/${SLUG}"
+        MARKER="${MARKER_DIR}/.workspace-trusted"
+
+        if [ -n "${SLUG}" ] && [ ! -f "${MARKER}" ] && command -v jq >/dev/null 2>&1; then
+          mkdir -p "${MARKER_DIR}"
+          jq -n --arg dir "${WORKDIR}" --arg at "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+            '{trustedAt: $at, workspacePath: $dir, trustMethod: "cli-flag"}' > "${MARKER}" || true
+        fi
+
+        exec "${HOME}/.local/bin/agent" "$@"
+        WRAPPER_EOF
+        chmod +x "${BIN_DIR}/cursor-sbx-agent"
+      user: "1000"
+      description: "Wrap the agent binary to pre-trust the real workspace cwd before it starts"
+
+    - command: |
+        set -euo pipefail
+
+        # Symlink Cursor session state to a host-mounted dir (if given) so
+        # it survives sandbox recreation. Everything else under ~/.cursor
+        # stays sandbox-local.
+        HOST_PERSIST_DIR="${{ kit.args.host_persist_dir }}"
+        if [ -n "${HOST_PERSIST_DIR}" ]; then
+          if [ ! -d "${HOST_PERSIST_DIR}" ]; then
+            echo "[cursor-sbx] ERROR(20): host_persist_dir=${HOST_PERSIST_DIR} does not exist (mount missing?)" >&2
+            exit 20
+          fi
+          mkdir -p "${HOME}/.cursor"
+
+          for rel in chats projects; do
+            src="${HOST_PERSIST_DIR}/${rel}"
+            dest="${HOME}/.cursor/${rel}"
+            mkdir -p "${src}"
+            if [ -e "${dest}" ] && [ ! -L "${dest}" ]; then
+              echo "[cursor-sbx] moving ${dest} aside to ${dest}.orig"
+              mv "${dest}" "${dest}.orig"
+            fi
+            if [ ! -L "${dest}" ]; then
+              echo "[cursor-sbx] linking ${dest} -> ${src}"
+              ln -s "${src}" "${dest}"
+            fi
+          done
+        fi
+      user: "1000"
+      description: "Link persistent session state, if mounted"
+
+permissions:
+  network:
+    allow:
+      # curl https://cursor.com/install, above; also browser login.
+      - cursor.com
+      - www.cursor.com
+      # The CLI package itself, and the CLI's own self-update.
+      - downloads.cursor.com
+      # Backend: auth (incl. the CURSOR_API_KEY exchange), models, the agent
+      # stream, and usage analytics — the last can't be switched off.
+      - api2.cursor.sh
+      - api2direct.cursor.sh
+      - api.cursor.com
+      # Codebase indexing (the CLI's default --repo-endpoint).
+      - repo42.cursor.sh
+      #
+      # Left out on purpose: api3.cursor.sh (metrics), Cursor's Sentry
+      # ingest host (crash reports) and statsigapi.net (Statsig SDK
+      # exception reports) — telemetry the CLI works without.
+      #
+      # TODO(cursor-extraction): the hosts above come from reading the CLI
+      # bundle, not a live run. The backend can also hand the CLI agent
+      # endpoints at runtime (agentUrl/agentnUrl). Confirm or widen from a
+      # live run under deny-all:
+      #
+      #   sbx run --kit ./cursor cursor   # then attempt a prompt
+      #   sbx policy log                  # lists every blocked host + reason

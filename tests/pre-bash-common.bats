@@ -26,6 +26,7 @@ allowed() {
 @test "hook library is identical across agents" {
   cmp "$HOOK" "$REPO/kits/agents/codex/files/home/.codex/hooks/pre-bash-common.sh"
   cmp "$HOOK" "$REPO/kits/agents/copilot/files/home/.copilot/hooks/pre-bash-common.sh"
+  cmp "$HOOK" "$REPO/kits/agents/cursor/files/home/.cursor/hooks/pre-bash-common.sh"
 }
 
 @test "blocks plain push to main/master" {
@@ -94,4 +95,23 @@ allowed() {
   allowed "git -C . status"
   allowed "git log main"
   allowed "git -c 'user.name=CI Bot' commit -m 'push to main'"
+}
+
+# Cursor's beforeShellExecution hook must always print a JSON decision:
+# empty stdout counts as a failed hook, and hooks.json sets failClosed.
+cursor_hook() {
+  jq -cn --arg c "$1" '{hook_event_name: "beforeShellExecution", command: $c}' \
+    | "$REPO/kits/agents/cursor/files/home/.cursor/hooks/pre-bash.sh"
+}
+
+@test "cursor hook denies a blocked command" {
+  run cursor_hook "git push origin main"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .permission <<< "$output")" = deny ]
+}
+
+@test "cursor hook answers an allowed command with an empty decision" {
+  run cursor_hook "ls -la"
+  [ "$status" -eq 0 ]
+  [ "$output" = "{}" ]
 }
