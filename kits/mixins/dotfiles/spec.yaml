@@ -3,24 +3,31 @@ kind: mixin
 name: dotfiles-mixin
 displayName: dotfiles (skills, plugins, packages)
 description: >
-  Clones ypxing/dotfiles and runs its install.sh for whichever agent the
-  sandbox is running: the skills in its sources.txt (coding-crew, ...) and
-  skills/ for every agent; for claude, the plugins in claude-plugins.txt
-  (claude-hud, commit-pinned and wired into the status line) plus
-  claude/claude-hud.json; for pi, the packages in pi-packages.txt. Every
-  third-party version is pinned in that repo, which bumps them through
-  reviewed PRs. https://github.com/ypxing/dotfiles
+  Clones a dotfiles repo (default https://github.com/ypxing/dotfiles) and
+  runs its install.sh for whichever agent the sandbox is running. With the
+  default repo that installs the skills in its sources.txt (coding-crew,
+  ...) and skills/ for every agent; for claude, the plugins in
+  claude-plugins.txt (claude-hud, commit-pinned and wired into the status
+  line) plus claude/claude-hud.json; for pi, the packages in
+  pi-packages.txt.
+
+  To use your own, point `repo` at it: it needs an executable install.sh at
+  its root that takes one agent id — claude-code, codex, github-copilot, pi
+  or cursor — as its argument, and must be reachable on github.com (or add
+  its host to the network allowlist in your own kit).
 
 args:
+  repo:
+    description: >
+      HTTPS git URL of the dotfiles repo to install, cloned without
+      credentials (a private repo needs its own credential injection).
+    default: https://github.com/ypxing/dotfiles.git
   ref:
     description: >
-      dotfiles git ref (branch, tag or commit sha) to install. A commit sha
+      Git ref (branch, tag or commit sha) of `repo` to install. A commit sha
       fixes which pins it installs; skill sources are pinned by tag only,
-      so a tag moved upstream still changes what they install. Defaults to
-      the first dotfiles commit with the claude-hud commit pin and
-      status-line wiring this repo relies on; bump it after reviewing
-      dotfiles' changes.
-    default: b6ef43b5738b0336ed13b75e76b7ae63843a92cc
+      so a tag moved upstream still changes what they install.
+    default: main
 
 setup:
   install:
@@ -48,8 +55,9 @@ setup:
           *) die 10 "unsupported agent '${AGENT}'" ;;
         esac
 
+        REPO="${{ kit.args.repo }}"
         REF="${{ kit.args.ref }}"
-        echo "[dotfiles] Installing dotfiles for ${SKILLS_AGENT} @ ${REF}"
+        echo "[dotfiles] Installing ${REPO} @ ${REF} for ${SKILLS_AGENT}"
 
         # Isolate from the bind-mounted host ~/.gitconfig (GIT_CONFIG_GLOBAL in
         # the sandbox env config): a host `url."git@github.com:".insteadOf`
@@ -65,12 +73,14 @@ setup:
 
         DOTFILES="$(mktemp -d)"
         git -C "${DOTFILES}" init -q
-        git -C "${DOTFILES}" fetch -q --depth 1 https://github.com/ypxing/dotfiles.git "${REF}" \
-          || die 11 "couldn't fetch dotfiles @ ${REF}"
+        git -C "${DOTFILES}" fetch -q --depth 1 "${REPO}" "${REF}" \
+          || die 11 "couldn't fetch ${REPO} @ ${REF}"
         git -C "${DOTFILES}" checkout -q FETCH_HEAD
 
+        [ -x "${DOTFILES}/install.sh" ] \
+          || die 13 "${REPO} @ ${REF} has no executable install.sh at its root"
         "${DOTFILES}/install.sh" "${SKILLS_AGENT}" \
-          || die 12 "dotfiles install.sh failed for ${SKILLS_AGENT} @ ${REF}"
+          || die 12 "install.sh from ${REPO} @ ${REF} failed for ${SKILLS_AGENT}"
         rm -rf "${DOTFILES}"
       user: "1000"
       description: "Install dotfiles skills, plugins and packages for the sandbox's agent"

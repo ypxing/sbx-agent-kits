@@ -103,11 +103,14 @@ Beyond the examples above, each mixin under `kits/mixins/` can help with:
 - **`herdr/`** — installs a checksum-pinned [herdr](https://herdr.dev)
   binary only; nothing is wired up automatically, run it yourself via
   `sbx exec -it <sandbox> herdr ...`.
-- **`dotfiles/`** — runs [dotfiles](https://github.com/ypxing/dotfiles)'
-  `install.sh` for the sandbox's agent: its pinned skills (e.g.
+- **`dotfiles/`** — runs a dotfiles repo's `install.sh` for the sandbox's
+  agent. The default, [ypxing/dotfiles](https://github.com/ypxing/dotfiles),
+  installs its pinned skills (e.g.
   [coding-crew](https://github.com/ypxing/coding-crew)), plus the claude-hud
-  statusline for claude and extra packages for pi. `--kit-arg ref=<sha>`
-  fixes which pins it installs (skill sources are pinned by tag only).
+  statusline for claude and extra packages for pi. Point `repo` at your own
+  (an `install.sh` at its root taking the agent id: `claude-code`, `codex`,
+  `github-copilot`, `pi` or `cursor`); `ref=<sha>` fixes which of its pins
+  install.
 - **`npm-auth/`** — private npm/yarn registry auth via an `NPM_TOKEN`
   secret.
 - **`apt-packages/`** — installs extra apt packages (e.g. a compiler, plus current `gh` from GitHub's apt repo) on
@@ -147,7 +150,7 @@ kits/agents/<agent>/
 
 kits/mixins/          sbx mixin kits — applied at sandbox-creation time
   aws/                 AWS CLI/auth + optional Bedrock routing
-  dotfiles/            skills + per-agent extras from ypxing/dotfiles
+  dotfiles/            skills + per-agent extras from a dotfiles repo
   herdr/               checksum-pinned herdr binary install (run manually)
   npm-auth/            npm/yarn registry auth
   apt-packages/        extra apt packages on top of the base image
