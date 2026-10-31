@@ -16,8 +16,11 @@ args:
     description: >
       dotfiles git ref (branch, tag or commit sha) to install. A commit sha
       fixes which pins it installs; skill sources are pinned by tag only,
-      so a tag moved upstream still changes what they install.
-    default: main
+      so a tag moved upstream still changes what they install. Defaults to
+      the first dotfiles commit with the claude-hud commit pin and
+      status-line wiring this repo relies on; bump it after reviewing
+      dotfiles' changes.
+    default: b6ef43b5738b0336ed13b75e76b7ae63843a92cc
 
 setup:
   install:

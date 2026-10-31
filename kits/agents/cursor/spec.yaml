@@ -2,7 +2,7 @@ schemaVersion: "2"
 kind: sandbox
 name: cursor-sbx
 displayName: Cursor Agent
-description: Cursor Agent CLI with CURSOR_API_KEY auth.
+description: Cursor Agent CLI, signed in with CURSOR_API_KEY or `agent login`.
 
 args:
   image:
@@ -15,9 +15,10 @@ args:
       sandbox recreation: ~/.cursor/chats (per-workspace conversation
       stores, which `agent resume` / `agent ls` read) and ~/.cursor/projects
       (per-workspace transcripts and the workspace-trust marker) are
-      symlinked into it. Everything else in ~/.cursor (cli-config.json, auth
-      credentials, hooks, skills) stays sandbox-local. Leave unset for a
-      fully ephemeral sandbox.
+      symlinked into it. Everything else in ~/.cursor (cli-config.json,
+      hooks, skills) and the `agent login` tokens in
+      ~/.config/cursor/auth.json stay sandbox-local. Leave unset for a fully
+      ephemeral sandbox.
     default: ""
   awsAuthRefresh:
     description: >
@@ -35,7 +36,9 @@ environment:
   variables:
     # Read by kits/mixins/dotfiles/ to pick this agent's skills/packages.
     SBX_AGENT: cursor
-    # `agent login` prints its URL instead of trying to open a browser.
+    # Sign-in is either CURSOR_API_KEY (see docs/getting-started.md) or
+    # `agent login`, a browser OAuth flow: with this set it prints the URL
+    # to open in the host's browser instead of trying to open one here.
     NO_OPEN_BROWSER: "1"
 
 setup:
@@ -146,7 +149,8 @@ permissions:
       - www.cursor.com
       # The CLI package itself, and the CLI's own self-update.
       - downloads.cursor.com
-      # Backend: auth (incl. the CURSOR_API_KEY exchange), models, the agent
+      # Backend: auth (the CURSOR_API_KEY exchange, and `agent login`'s
+      # token polling), models, the agent
       # stream, and usage analytics — the last can't be switched off.
       - api2.cursor.sh
       - api2direct.cursor.sh

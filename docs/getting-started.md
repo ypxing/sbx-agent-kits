@@ -53,7 +53,7 @@ security find-generic-password -s npm-token -w | xargs -I {} \
                         --value {}
 ```
 
-**Cursor API key** (only needed for `--env-arg agent=cursor`) — create one in
+**Cursor API key** (optional, for `--env-arg agent=cursor`) — create one in
 the [Cursor dashboard](https://cursor.com/dashboard/api), then:
 
 ```
@@ -62,6 +62,10 @@ security find-generic-password -s cursor-api-key -w | xargs -I {} \
                         --env CURSOR_API_KEY \
                         --value {}
 ```
+
+Without one, sign in from inside the sandbox with `agent login` instead: it
+prints a URL to open in your browser. That login is kept in the sandbox only,
+so a recreated sandbox needs it again.
 
 **GitHub token** (re-run when it expires)
 
