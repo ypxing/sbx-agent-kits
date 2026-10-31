@@ -86,8 +86,12 @@ setup:
         # own name, cursor-sbx-agent, in npm's global bin dir (on PATH), and
         # is the sandbox's entrypoint; it writes the marker and execs the real
         # ~/.local/bin/agent. `agent` run by hand via `sbx exec` skips it.
-        BIN_DIR="$(npm prefix -g)/bin"
-        mkdir -p "${BIN_DIR}"
+        # Also create lib/: without an `npm install -g` here nothing makes it,
+        # and later npm/npx calls (dotfiles' install.sh) fail with ENOENT
+        # lstat on <prefix>/lib.
+        NPM_PREFIX="$(npm prefix -g)"
+        BIN_DIR="${NPM_PREFIX}/bin"
+        mkdir -p "${BIN_DIR}" "${NPM_PREFIX}/lib"
 
         cat > "${BIN_DIR}/cursor-sbx-agent" <<'WRAPPER_EOF'
         #!/bin/sh
