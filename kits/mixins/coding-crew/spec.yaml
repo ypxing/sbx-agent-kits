@@ -3,7 +3,7 @@ kind: mixin
 name: coding-crew-mixin
 displayName: coding-crew local config
 description: >
-  Ships a user-level ~/.coding-crew/config.json for /solve-feature: no push
+  Ships a user-level ~/.coding-crew/config.json (local issue tracker as the default) for /solve-feature: no push
   and no PR (the PR body stays in .coding-crew/solve-feature/local-pr-<branch>.md
   for you to push and open later), coder and fixer on claude-sonnet-5-5, reviewer on claude-opus-5-5.
   Installs nothing. Copy it as a local kit dir to change the settings.

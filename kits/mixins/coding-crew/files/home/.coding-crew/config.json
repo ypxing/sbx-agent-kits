@@ -1,4 +1,7 @@
 {
+  "tracker": {
+    "kind": "local"
+  },
   "solveFeature": {
     "publish": false,
     "models": {
