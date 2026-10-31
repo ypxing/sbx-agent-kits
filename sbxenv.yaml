@@ -35,9 +35,10 @@ kits:
       packages: "g++ cmake zip bats"
   - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/agent-packages
   - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/domains-access
-  # template for an org's own domains, tenants and SaaS tools (Atlassian,
-  # New Relic, Figma, Slack) — swap in your own org's copy
-  - git+https://github.com/ypxing/sbx-agent-kits.git#dir=kits/mixins/example-org
+  # your org's own domains, tenants and SaaS tools: copy the
+  # kits/mixins/example-org template with your own hosts and add the copy,
+  # e.g. as a local kit dir:
+  # - ./.sbx/your-org
 
 additionalWorkspaces:
   # avoid updates to the sbx-env folder from the sandbox
