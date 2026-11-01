@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 input=$(cat)
-cmd=$(echo "$input" | jq -r '.tool_input.command // empty' 2>/dev/null) || cmd=""
+cmd=$(echo "$input" | jq -r '.tool_input.command // empty' 2>/dev/null) || parse_failed=1
 
 # shellcheck source=pre-bash-common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/pre-bash-common.sh"
 
-if pre_bash_command_blocked "$cmd"; then
+# Input that isn't valid JSON blocks (fails closed) rather than passing as an empty command.
+if [ -n "${parse_failed:-}" ] || pre_bash_command_blocked "$cmd"; then
   echo '{"hookSpecificOutput": {"permissionDecision": "deny"}, "systemMessage": "Blocked: make *deploy*, git push to main/master, non-read-only aws commands (only describe-/list-/get-/head-/lookup-/search-/query/scan/tail/ls are allowed), docker compose *deploy*, wget, reading .env*/.npmrc*/.yarnrc* files, destructive SQL (UPDATE/DELETE/DROP/TRUNCATE/ALTER DROP)"}' >&2
   exit 2
 fi
