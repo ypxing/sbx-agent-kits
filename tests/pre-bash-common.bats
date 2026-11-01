@@ -115,3 +115,30 @@ cursor_hook() {
   [ "$status" -eq 0 ]
   [ "$output" = "{}" ]
 }
+
+# A hook input that isn't valid JSON must block, never fall through to an
+# empty (allowed) command. Each agent signals "blocked" its own way.
+agent_hook() { printf '%s' "$2" | "$REPO/kits/agents/$1/pre-bash.sh"; }
+BAD_INPUT='{"tool_input": {"command": "git push origin main"'
+
+@test "claude hook blocks unparseable input" {
+  run agent_hook claude/files/home/.claude/hooks "$BAD_INPUT"
+  [ "$status" -eq 2 ]
+}
+
+@test "codex hook blocks unparseable input" {
+  run agent_hook codex/files/home/.codex/hooks "$BAD_INPUT"
+  [ "$status" -eq 2 ]
+}
+
+@test "copilot hook blocks unparseable input" {
+  run agent_hook copilot/files/home/.copilot/hooks "$BAD_INPUT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .permissionDecision <<< "$output")" = deny ]
+}
+
+@test "cursor hook blocks unparseable input" {
+  run agent_hook cursor/files/home/.cursor/hooks "$BAD_INPUT"
+  [ "$status" -eq 0 ]
+  [ "$(jq -r .permission <<< "$output")" = deny ]
+}
